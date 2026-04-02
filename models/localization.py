@@ -1,8 +1,20 @@
 """Localization modules
 """
 
+import os
+import sys
 import torch
+import numpy as np
 import torch.nn as nn
+
+np.random.seed(42)
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from models.vgg11 import VGG11
+
 
 class VGG11Localizer(nn.Module):
     """VGG11-based localizer."""
@@ -15,7 +27,18 @@ class VGG11Localizer(nn.Module):
             in_channels: Number of input channels.
             dropout_p: Dropout probability for the localization head.
         """
-        pass
+        
+        super().__init__()
+        # Extract features from image
+        self.encoder = VGG11()
+        
+        # Convert features into bounding box coordinates
+        self.head = nn.Sequential(
+        nn.Flatten(),
+        nn.Linear(512 * 7 * 7, 1024),
+        nn.ReLU(),
+        nn.Linear(1024, 4))
+        
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass for localization model.
@@ -25,5 +48,11 @@ class VGG11Localizer(nn.Module):
         Returns:
             Bounding box coordinates [B, 4] in (x_center, y_center, width, height) format in original image pixel space(not normalized values).
         """
-        # TODO: Implement forward pass.
-        raise NotImplementedError("Implement VGG11Localizer.forward")
+        x = self.encoder(x)
+        x = self.head(x)
+
+        centers = torch.sigmoid(x[:, :2]) * 224.0
+        sizes = torch.sigmoid(x[:, 2:]) * 224.0
+
+        return torch.cat([centers, sizes], dim=1)
+    
