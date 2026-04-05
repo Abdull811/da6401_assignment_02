@@ -240,7 +240,6 @@ def train(dropout_p=0.5, freeze_mode="full"):
             feature = segmenter.encoder(images)
 
         feature = feature.detach().cpu()
-
         # convert [512,7,7] → [7,7]
         fm = feature[0].mean(dim=0)
 
@@ -263,7 +262,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
             "pred_mask": wandb.Image(pred.numpy()),
 
             # Feature map (FIXED)
-            "feature_map": wandb.Image(fm.numpy())   
+            "feature_map": wandb.Image(fm.numpy() * 120)   
         })
 
         for i in range(min(3, images.shape[0])):
