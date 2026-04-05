@@ -208,6 +208,30 @@ def train(dropout_p=0.5, freeze_mode="full"):
         dice_avg = dice_total / len(val_loader)
         acc_avg = acc_total / len(val_loader)
 
+        with torch.no_grad():
+            x = images
+        
+            # First layer
+            x1 = segmenter.encoder.conv1(x)
+            first_map = x1[0].mean(dim=0).detach().cpu()
+        
+            # Pass through encoder properly
+            x = segmenter.encoder.pool(x1)
+            x = segmenter.encoder.conv2(x)
+            x = segmenter.encoder.pool(x)
+            x = segmenter.encoder.conv3(x)
+            x = segmenter.encoder.conv4(x)
+            x = segmenter.encoder.pool(x)
+            x = segmenter.encoder.conv5(x)
+            x = segmenter.encoder.conv6(x)
+            x = segmenter.encoder.pool(x)
+        
+            # Last conv block
+            x_last = segmenter.encoder.conv7(x)
+            x_last = segmenter.encoder.conv8(x_last)
+        
+            last_map = x_last[0].mean(dim=0).detach().cpu()
+
         # SEGMENTATION VISUALIZATION (W&B)
         img = images[0].cpu()
         gt = masks[0].cpu()
@@ -232,7 +256,6 @@ def train(dropout_p=0.5, freeze_mode="full"):
             "train_seg_loss": total_seg,
             "val_dice": dice_avg,
             "val_pixel_acc": acc_avg,
-            "feature_map": wandb.Image(fm.numpy()),
             "iou": iou,
             # Image
             "input": wandb.Image(img.permute(1,2,0).numpy()),
@@ -243,6 +266,25 @@ def train(dropout_p=0.5, freeze_mode="full"):
             "feature_map": wandb.Image(fm.numpy())   
         })
 
+        for i in range(min(3, images.shape[0])):
+            wandb.log({
+                f"sample_{i}_input": wandb.Image(images[i].cpu().permute(1,2,0).numpy()),
+                f"sample_{i}_gt": wandb.Image(masks[i].cpu().numpy() * 100),
+                f"sample_{i}_pred": wandb.Image(torch.argmax(seg_out[i], dim=0).cpu().numpy() * 100)
+            })
+
+        table = wandb.Table(columns=["image", "iou"])
+
+        for i in range(min(5, images.shape[0])):
+            img_i = images[i].cpu().permute(1,2,0).numpy()
+            iou_i = compute_iou(
+                loc_out[i].detach().cpu().numpy(),
+                bboxes[i].detach().cpu().numpy()
+            )
+            table.add_data(wandb.Image(img_i), iou_i)
+        
+        wandb.log({"IoU_table": table})
+        
         print(f"\nEpoch {epoch+1} DONE → CLS={total_cls:.3f}, LOC={total_loc:.3f}, SEG={total_seg:.3f}")
         print(f"Validation → Dice={dice_avg:.3f}, Acc={acc_avg:.3f}")
 
