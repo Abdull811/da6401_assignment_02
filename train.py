@@ -1,480 +1,257 @@
-"""Training entrypoint
-"""
+"""Training entrypoint for DA6401 Assignment-2"""
 
 import os
-import argparse
+import sys
+import wandb
 
+os.environ["WANDB_API_KEY"] = "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"
+
+wandb.login()
+
+
+import numpy as np
 import torch
 import torch.nn as nn
-import wandb
-from sklearn.metrics import f1_score
+import torch.optim as optim
 from torch.utils.data import DataLoader
 
+
+np.random.seed(42)
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from data.pets_dataset import OxfordIIITPetDataset
-from losses.iou_loss import IoULoss
 from models.classification import VGG11Classifier
 from models.localization import VGG11Localizer
 from models.segmentation import VGG11UNet
-from models.multitask import MultiTaskPerceptionModel
+from losses.iou_loss import IoULoss
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data_root", type=str, required=True)
-    parser.add_argument(
-        "--task",
-        type=str,
-        default="classification",
-        choices=["classification", "localization", "segmentation", "multitask"],
+# CONFIG 
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+BATCH_SIZE = 8
+EPOCHS = 2
+LR = 1e-4
+
+
+# METRICS 
+def dice_score(pred, target):
+    pred = torch.argmax(pred, dim=1)
+    dice = 0
+    for cls in range(1, 3):
+        pred_c = (pred == cls).float()
+        target_c = (target == cls).float()
+        inter = (pred_c * target_c).sum()
+        union = pred_c.sum() + target_c.sum()
+        dice += (2 * inter + 1e-6) / (union + 1e-6)
+    return dice / 2
+
+
+def dice_loss(pred, target):
+    pred = torch.softmax(pred, dim=1)
+    target_onehot = torch.nn.functional.one_hot(target, num_classes=3)
+    target_onehot = target_onehot.permute(0, 3, 1, 2).float()
+
+    inter = (pred * target_onehot).sum(dim=(2, 3))
+    union = pred.sum(dim=(2, 3)) + target_onehot.sum(dim=(2, 3))
+
+    dice = (2 * inter + 1e-6) / (union + 1e-6)
+    return 1 - dice.mean()
+
+
+def pixel_accuracy(pred, target):
+    pred = torch.argmax(pred, dim=1)
+    return (pred == target).float().mean()
+
+
+def compute_iou(box1, box2):
+    def convert(box):
+        xc, yc, w, h = box
+        return xc-w/2, yc-h/2, xc+w/2, yc+h/2
+
+    px1, py1, px2, py2 = convert(box1)
+    tx1, ty1, tx2, ty2 = convert(box2)
+
+    ix1, iy1 = max(px1, tx1), max(py1, ty1)
+    ix2, iy2 = min(px2, tx2), min(py2, ty2)
+
+    inter = max(ix2-ix1, 0) * max(iy2-iy1, 0)
+    union = (px2-px1)*(py2-py1) + (tx2-tx1)*(ty2-ty1) - inter
+    return inter / (union + 1e-6)
+
+
+# TRAIN 
+def train(dropout_p=0.5, freeze_mode="full"):
+
+    wandb.init(
+        project="da6401_Assigment_02_Weight_&_Biase",
+        name=f"dropout_{dropout_p}_{freeze_mode}",
+        config={"dropout": dropout_p, "freeze": freeze_mode},
+        mode="online"
     )
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--val_split", type=float, default=0.2)
-    parser.add_argument("--dropout_p", type=float, default=0.5)
-    parser.add_argument("--checkpoint_dir", type=str, default="checkpoints")
-    parser.add_argument(
-        "--wandb_mode",
-        type=str,
-        default="offline",
-        choices=["online", "offline", "disabled"],
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cuda" if torch.cuda.is_available() else "cpu",
-    )
-    parser.add_argument(
-        "--freeze_strategy",
-        type=str,
-        default="full",
-        choices=["freeze", "partial", "full"],
-    )
-    return parser.parse_args()
+    print("W&B RUN:", wandb.run.url)
 
 
-def read_split_file(path):
-    if not os.path.exists(path):
-        raise FileNotFoundError("Split file not found: " + path)
-
-    files = []
-    with open(path, "r", encoding="utf-8") as file:
-        for line in file:
-            parts = line.strip().split()
-            if parts:
-                files.append(parts[0] + ".jpg")
-    return files
-
-
-def load_labels(annotation_dir):
-    labels = {}
-    for split_name in ["trainval.txt", "test.txt"]:
-        split_path = os.path.join(annotation_dir, split_name)
-        if not os.path.exists(split_path):
-            continue
-
-        with open(split_path, "r", encoding="utf-8") as file:
-            for line in file:
-                parts = line.strip().split()
-                if len(parts) >= 2:
-                    labels[parts[0] + ".jpg"] = int(parts[1]) - 1
-
-    if len(labels) == 0:
-        raise FileNotFoundError("Could not load labels from annotations folder: " + annotation_dir)
-
-    return labels
-
-
-def read_tag_value(text, tag):
-    start_token = "<" + tag + ">"
-    end_token = "</" + tag + ">"
-    start = text.find(start_token)
-    end = text.find(end_token)
-
-    if start == -1 or end == -1:
-        return None
-
-    start += len(start_token)
-    return text[start:end].strip()
-
-
-def resolve_xml_dir(annotations_dir):
-    candidates = [
-        os.path.join(annotations_dir, "xmls"),
-        os.path.join(annotations_dir, "xml"),
-        os.path.join(annotations_dir, "annotations"),
-    ]
-
-    for path in candidates:
-        if os.path.isdir(path):
-            return path
-
-    raise FileNotFoundError(
-        "Could not find bbox xml directory. Expected one of: "
-        + ", ".join(candidates)
-    )
-
-
-def load_bboxes(xml_dir):
-    bboxes = {}
-    for file_name in os.listdir(xml_dir):
-        if not file_name.endswith(".xml"):
-            continue
-
-        xml_path = os.path.join(xml_dir, file_name)
-        with open(xml_path, "r", encoding="utf-8") as file:
-            text = file.read()
-
-        xmin = read_tag_value(text, "xmin")
-        ymin = read_tag_value(text, "ymin")
-        xmax = read_tag_value(text, "xmax")
-        ymax = read_tag_value(text, "ymax")
-
-        if None in [xmin, ymin, xmax, ymax]:
-            continue
-
-        image_name = os.path.splitext(file_name)[0] + ".jpg"
-        bboxes[image_name] = [float(xmin), float(ymin), float(xmax), float(ymax)]
-
-    if len(bboxes) == 0:
-        raise FileNotFoundError("No valid xml bbox annotations found in: " + xml_dir)
-
-    return bboxes
-
-
-def make_train_val_split(trainval_files, val_split=0.2, seed=42):
-    generator = torch.Generator().manual_seed(seed)
-    indices = torch.randperm(len(trainval_files), generator=generator).tolist()
-
-    split_index = int(len(trainval_files) * (1.0 - val_split))
-    if split_index <= 0:
-        split_index = 1
-    if split_index >= len(trainval_files):
-        split_index = len(trainval_files) - 1
-
-    train_indices = indices[:split_index]
-    val_indices = indices[split_index:]
-
-    train_files = [trainval_files[i] for i in train_indices]
-    val_files = [trainval_files[i] for i in val_indices]
-    return train_files, val_files
-
-
-def build_dataloaders(data_root, batch_size, num_workers, val_split):
-    images_dir = os.path.join(data_root, "images")
-    annotations_dir = os.path.join(data_root, "annotations")
-    masks_dir = os.path.join(annotations_dir, "trimaps")
-    xml_dir = resolve_xml_dir(annotations_dir)
-
-    if not os.path.isdir(images_dir):
-        raise FileNotFoundError("Images directory not found: " + images_dir)
-    if not os.path.isdir(annotations_dir):
-        raise FileNotFoundError("Annotations directory not found: " + annotations_dir)
-    if not os.path.isdir(masks_dir):
-        raise FileNotFoundError("Trimaps directory not found: " + masks_dir)
-
-    labels_dict = load_labels(annotations_dir)
-    bboxes_dict = load_bboxes(xml_dir)
-
-    trainval_path = os.path.join(annotations_dir, "trainval.txt")
-    trainval_files = read_split_file(trainval_path)
-    trainval_files = [name for name in trainval_files if name in labels_dict and name in bboxes_dict]
-
-    if len(trainval_files) < 2:
-        raise ValueError("Not enough training samples found after matching labels and bboxes.")
-
-    train_files, val_files = make_train_val_split(trainval_files, val_split=val_split)
-
-    train_dataset = OxfordIIITPetDataset(
-        images_dir=images_dir,
-        masks_dir=masks_dir,
-        labels_dict=labels_dict,
-        bboxes_dict=bboxes_dict,
-        image_files=train_files,
-    )
-    val_dataset = OxfordIIITPetDataset(
-        images_dir=images_dir,
-        masks_dir=masks_dir,
-        labels_dict=labels_dict,
-        bboxes_dict=bboxes_dict,
-        image_files=val_files,
-    )
-
+    # DATA
     train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
+        OxfordIIITPetDataset("data", "train"),
+        batch_size=BATCH_SIZE, shuffle=True
     )
     val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-    )
-    return train_loader, val_loader
-
-
-def freeze_backbone(model, strategy):
-    encoder = None
-    if hasattr(model, "encoder"):
-        encoder = model.encoder
-
-    if encoder is None:
-        return
-
-    for parameter in encoder.parameters():
-        parameter.requires_grad = True
-
-    if strategy == "freeze":
-        for parameter in encoder.parameters():
-            parameter.requires_grad = False
-    elif strategy == "partial":
-        for block_name in ["block1", "block2", "block3"]:
-            if hasattr(encoder, block_name):
-                for parameter in getattr(encoder, block_name).parameters():
-                    parameter.requires_grad = False
-
-
-def get_model(task, dropout_p):
-    if task == "classification":
-        return VGG11Classifier(dropout_p=dropout_p)
-    if task == "localization":
-        return VGG11Localizer(dropout_p=dropout_p)
-    if task == "segmentation":
-        return VGG11UNet(dropout_p=dropout_p)
-    return MultiTaskPerceptionModel()
-
-
-def get_checkpoint_name(task):
-    if task == "classification":
-        return "classifier.pth"
-    if task == "localization":
-        return "localizer.pth"
-    if task == "segmentation":
-        return "unet.pth"
-    return "multitask.pth"
-
-
-def compute_iou_score(pred_boxes, target_boxes):
-    loss = IoULoss(reduction="none")(pred_boxes, target_boxes)
-    return (1.0 - loss).mean().item()
-
-
-def dice_score(logits, targets, eps=1e-6):
-    preds = torch.argmax(logits, dim=1)
-    preds_fg = (preds > 0).float()
-    targets_fg = (targets > 0).float()
-
-    intersection = (preds_fg * targets_fg).sum(dim=(1, 2))
-    union = preds_fg.sum(dim=(1, 2)) + targets_fg.sum(dim=(1, 2))
-    dice = (2.0 * intersection + eps) / (union + eps)
-    return dice.mean().item()
-
-
-def pixel_accuracy(logits, targets):
-    preds = torch.argmax(logits, dim=1)
-    return (preds == targets).float().mean().item()
-
-
-def forward_and_loss(model, imgs, labels, bboxes, masks, task, cls_loss_fn, seg_loss_fn, iou_loss_fn):
-    outputs = model(imgs)
-
-    if task == "classification":
-        loss = cls_loss_fn(outputs, labels)
-        preds = torch.argmax(outputs, dim=1)
-        metrics = {
-            "f1": f1_score(labels.detach().cpu().numpy(), preds.detach().cpu().numpy(), average="macro")
-        }
-        return loss, metrics
-
-    if task == "localization":
-        mse_loss = nn.functional.mse_loss(outputs, bboxes)
-        iou_loss = iou_loss_fn(outputs, bboxes)
-        loss = mse_loss + iou_loss
-        metrics = {
-            "iou": compute_iou_score(outputs.detach(), bboxes.detach())
-        }
-        return loss, metrics
-
-    if task == "segmentation":
-        loss = seg_loss_fn(outputs, masks)
-        metrics = {
-            "dice": dice_score(outputs.detach(), masks.detach()),
-            "pixel_acc": pixel_accuracy(outputs.detach(), masks.detach()),
-        }
-        return loss, metrics
-
-    cls_loss = cls_loss_fn(outputs["classification"], labels)
-    loc_mse = nn.functional.mse_loss(outputs["localization"], bboxes)
-    loc_iou = iou_loss_fn(outputs["localization"], bboxes)
-    seg_loss = seg_loss_fn(outputs["segmentation"], masks)
-
-    loss = cls_loss + loc_mse + loc_iou + seg_loss
-
-    preds = torch.argmax(outputs["classification"], dim=1)
-    metrics = {
-        "f1": f1_score(labels.detach().cpu().numpy(), preds.detach().cpu().numpy(), average="macro"),
-        "iou": compute_iou_score(outputs["localization"].detach(), bboxes.detach()),
-        "dice": dice_score(outputs["segmentation"].detach(), masks.detach()),
-        "pixel_acc": pixel_accuracy(outputs["segmentation"].detach(), masks.detach()),
-    }
-    return loss, metrics
-
-
-def run_epoch(model, loader, optimizer, device, task, cls_loss_fn, seg_loss_fn, iou_loss_fn, training):
-    if training:
-        model.train()
-    else:
-        model.eval()
-
-    totals = {"loss": 0.0}
-    steps = 0
-
-    for imgs, labels, bboxes, masks in loader:
-        imgs = imgs.to(device)
-        labels = labels.to(device)
-        bboxes = bboxes.to(device)
-        masks = masks.to(device)
-
-        with torch.set_grad_enabled(training):
-            loss, metrics = forward_and_loss(
-                model,
-                imgs,
-                labels,
-                bboxes,
-                masks,
-                task,
-                cls_loss_fn,
-                seg_loss_fn,
-                iou_loss_fn,
-            )
-
-            if training:
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-        totals["loss"] += loss.item()
-        for key, value in metrics.items():
-            totals[key] = totals.get(key, 0.0) + value
-        steps += 1
-
-    for key in totals:
-        totals[key] /= steps
-    return totals
-
-
-def wandb_start(args):
-    if args.wandb_mode == "disabled":
-        return None, args
-
-    try:
-        wandb.init(
-            project="da6401_Assigment_02_Weight_&_Biase",
-            config=vars(args),
-            mode=args.wandb_mode,
-        )
-    except Exception:
-        wandb.init(
-            project="da6401_Assigment_02_Weight_&_Biase",
-            config=vars(args),
-            mode="offline",
-        )
-
-    return wandb.run, wandb.config
-
-
-def wandb_log(data, run):
-    if run is not None:
-        wandb.log(data)
-
-
-def wandb_finish(run):
-    if run is not None:
-        wandb.finish()
-
-
-def main():
-    args = parse_args()
-    os.makedirs(args.checkpoint_dir, exist_ok=True)
-
-    run, config = wandb_start(args)
-
-    train_loader, val_loader = build_dataloaders(
-        config.data_root,
-        config.batch_size,
-        config.num_workers,
-        config.val_split,
+        OxfordIIITPetDataset("data", "val"),
+        batch_size=BATCH_SIZE
     )
 
-    device = torch.device(config.device)
-    model = get_model(config.task, config.dropout_p).to(device)
+    # MODELS
+    classifier = VGG11Classifier(dropout_p=dropout_p).to(DEVICE)
+    localizer = VGG11Localizer(dropout_p=dropout_p).to(DEVICE)
+    segmenter = VGG11UNet(dropout_p=dropout_p).to(DEVICE)
 
-    if config.task in ["localization", "segmentation"]:
-        freeze_backbone(model, config.freeze_strategy)
+    # Transfer Learning control
+    if freeze_mode == "freeze":
+        for p in segmenter.encoder.parameters():
+            p.requires_grad = False
 
-    optimizer = torch.optim.Adam(
-        filter(lambda parameter: parameter.requires_grad, model.parameters()),
-        lr=config.lr,
-    )
+    elif freeze_mode == "partial":
+        for i, p in enumerate(segmenter.encoder.parameters()):
+            if i < len(list(segmenter.encoder.parameters())) // 2:
+                p.requires_grad = False
 
+    # LOSSES
     cls_loss_fn = nn.CrossEntropyLoss()
+    loc_loss_fn = nn.MSELoss()
+    iou_loss_fn = IoULoss()
     seg_loss_fn = nn.CrossEntropyLoss()
-    iou_loss_fn = IoULoss(reduction="mean")
 
-    best_val_loss = float("inf")
+    # OPTIMIZERS
+    cls_opt = optim.Adam(classifier.parameters(), lr=LR)
+    loc_opt = optim.Adam(localizer.parameters(), lr=LR)
+    seg_opt = optim.Adam(segmenter.parameters(), lr=LR)
 
-    for epoch in range(config.epochs):
-        train_logs = run_epoch(
-            model,
-            train_loader,
-            optimizer,
-            device,
-            config.task,
-            cls_loss_fn,
-            seg_loss_fn,
-            iou_loss_fn,
-            training=True,
-        )
+    
+    # TRAIN LOOP
+    for epoch in range(EPOCHS):
 
-        val_logs = run_epoch(
-            model,
-            val_loader,
-            optimizer,
-            device,
-            config.task,
-            cls_loss_fn,
-            seg_loss_fn,
-            iou_loss_fn,
-            training=False,
-        )
+        print(f"\n===== EPOCH {epoch+1}/{EPOCHS} =====")
 
-        log_dict = {
-            "epoch": epoch + 1,
-            "train/loss": train_logs["loss"],
-            "val/loss": val_logs["loss"],
-            "lr": optimizer.param_groups[0]["lr"],
-        }
+        classifier.train()
+        localizer.train()
+        segmenter.train()
 
-        for key, value in train_logs.items():
-            if key != "loss":
-                log_dict["train/" + key] = value
+        total_cls = total_loc = total_seg = 0
 
-        for key, value in val_logs.items():
-            if key != "loss":
-                log_dict["val/" + key] = value
+        for st, (images, labels, bboxes, masks) in enumerate(train_loader):
 
-        wandb_log(log_dict, run)
+            if st == 0:  # Print shapes and stats for the first batch
+                print("Image shape:", images.shape)
+                print("Mask shape:", masks.shape)
+                print("Mask unique values:", masks.unique())
 
-        if val_logs["loss"] < best_val_loss:
-            best_val_loss = val_logs["loss"]
-            save_path = os.path.join(config.checkpoint_dir, get_checkpoint_name(config.task))
-            torch.save({"state_dict": model.state_dict()}, save_path)
+            images = images.to(DEVICE)
+            labels = labels.to(DEVICE)
+            bboxes = bboxes.to(DEVICE)
+            masks = masks.to(DEVICE)
 
-    wandb_finish(run)
+            # CLASSIFICATION
+            cls_out = classifier(images)
+            cls_loss = cls_loss_fn(cls_out, labels)
+
+            cls_opt.zero_grad()
+            cls_loss.backward()
+            cls_opt.step()
+
+            # LOCALIZATION
+            loc_out = localizer(images)
+            loc_loss = loc_loss_fn(loc_out, bboxes) + iou_loss_fn(loc_out, bboxes)
+
+            loc_opt.zero_grad()
+            loc_loss.backward()
+            loc_opt.step()
+
+            # SEGMENTATION
+            seg_out = segmenter(images)
+            seg_loss = seg_loss_fn(seg_out, masks) + dice_loss(seg_out, masks)
+
+            seg_opt.zero_grad()
+            seg_loss.backward()
+            seg_opt.step()
+
+            total_cls += cls_loss.item()
+            total_loc += loc_loss.item()
+            total_seg += seg_loss.item()
+
+            # PRINT STEP PROGRESS
+            if st % 20 == 0:
+                print(f"[Step {st}] CLS: {cls_loss:.3f} | LOC: {loc_loss:.3f} | SEG: {seg_loss:.3f}")
+
+        # VALIDATION
+        classifier.eval()
+        localizer.eval()
+        segmenter.eval()
+
+        dice_total = acc_total = 0
+
+        with torch.no_grad():
+            for step, (images, labels, bboxes, masks) in enumerate(val_loader):
+
+                images = images.to(DEVICE)
+                masks = masks.to(DEVICE)
+
+                seg_out = segmenter(images)
+
+                dice_total += dice_score(seg_out, masks)
+                acc_total += pixel_accuracy(seg_out, masks)
+
+        dice_avg = dice_total / len(val_loader)
+        acc_avg = acc_total / len(val_loader)
+
+        # SEGMENTATION VISUALIZATION (W&B)
+        img = images[0].cpu()
+        gt = masks[0].cpu()
+        pred = torch.argmax(seg_out[0], dim=0).cpu()
+        feature = segmenter.encoder(images)
+        iou = compute_iou(loc_out[0].cpu().numpy(), bboxes[0].cpu().numpy())
+
+        wandb.log({
+            "epoch": epoch,
+            "train_cls_loss": total_cls,
+            "train_loc_loss": total_loc,
+            "train_seg_loss": total_seg,
+            "val_dice": dice_avg,
+            "val_pixel_acc": acc_avg,
+            "feature_map": wandb.Image(feature[0].cpu().numpy()),
+            "iou": iou,
+            "segmentation": [
+                wandb.Image(img.permute(1,2,0).numpy(), caption="Input"),
+                wandb.Image(gt.numpy(), caption="Ground Truth"),
+                wandb.Image(pred.numpy(), caption="Prediction")
+            ],
+        "sample_image": wandb.Image(img.permute(1,2,0).numpy(), caption="Sample Input"),
+        "batch_images": [
+        wandb.Image(feature[0].cpu().numpy())
+        for i in range(3)]   
+        })
+
+        print(f"\nEpoch {epoch+1} DONE → CLS={total_cls:.3f}, LOC={total_loc:.3f}, SEG={total_seg:.3f}")
+        print(f"Validation → Dice={dice_avg:.3f}, Acc={acc_avg:.3f}")
+
+    # SAVE MODELS
+    torch.save(classifier.state_dict(), "classifier.pth")
+    torch.save(localizer.state_dict(), "localizer.pth")
+    torch.save(segmenter.state_dict(), "unet.pth")
+
+    wandb.finish()
 
 
+# RUN
 if __name__ == "__main__":
-    main()
+    
+    # DROPOUT EXPERIMENTS
+    for d in [0.0, 0.2, 0.5]:
+        train(dropout_p=d, freeze_mode="full")
+
+    # TRANSFER LEARNING EXPERIMENTS
+    for mode in ["freeze", "partial", "full"]:
+        train(dropout_p=0.5, freeze_mode=mode)    
