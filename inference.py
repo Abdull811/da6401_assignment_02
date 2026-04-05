@@ -1,23 +1,37 @@
 """Inference and evaluation
 """
-
+import os, sys
 import torch
+import wandb
 from models.multitask import MultiTaskPerceptionModel
+import matplotlib.image as mpimg
+import numpy as np
 
+np.random.seed(42)
 
-def main():
-    model = MultiTaskPerceptionModel()
-    model.eval()
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-    x = torch.randn(1, 3, 224, 224)
+wandb.init(project="da6401_Assigment_02_Weight_&_Biase")
 
-    with torch.no_grad():
-        output = model(x)
+model = MultiTaskPerceptionModel()
+model.eval()
 
-    print(output["classification"].shape)
-    print(output["localization"].shape)
-    print(output["segmentation"].shape)
+# Load external image
+img = mpimg.imread("test.jpg").astype(np.float32)
 
+if img.max() > 1:
+    img = img / 255.0
 
-if __name__ == "__main__":
-    main()
+img = torch.tensor(img).permute(2,0,1).unsqueeze(0)
+
+with torch.no_grad():
+    out = model(img)
+
+pred_mask = torch.argmax(out["segmentation"][0], dim=0)
+
+wandb.log({
+    "final_input": wandb.Image(img[0].permute(1,2,0).numpy()),
+    "final_pred_mask": wandb.Image(pred_mask.numpy() * 100)
+})
