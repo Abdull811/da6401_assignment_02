@@ -80,7 +80,7 @@ class VGG11Encoder(nn.Module):
         x = self.conv7(x)
         x = self.conv8(x)
         features["enc5"] = x      # Lowest resolution
-        #x = self.pool(x)
+        x = self.pool(x)
 
         # Return
         if return_features:
