@@ -32,7 +32,7 @@ from losses.iou_loss import IoULoss
 # Configuration
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 8
-EPOCHS = 2
+EPOCHS = 10
 LR = 1e-4
 
 
