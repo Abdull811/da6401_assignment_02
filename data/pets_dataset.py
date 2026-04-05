@@ -74,23 +74,23 @@ class OxfordIIITPetDataset(Dataset):
         # LOAD MASK
         mask = mpimg.imread(mask_path)
 
-        # convert to single channel if RGB
+        # Convert to single channel
         if len(mask.shape) == 3:
             mask = mask[:, :, 0]
 
+        # Convert to uint8 safely
         if mask.max() <= 1.0:
             mask = (mask * 255).astype(np.uint8)
         else:
             mask = mask.astype(np.uint8)
 
-        # FINAL CORRECT LABEL MAPPING
-        mask[mask == 1] = 0   # background
-        mask[mask == 2] = 1   # pet
-        mask[mask == 3] = 2   # boundary
+        mask_final = np.zeros_like(mask, dtype=np.int64)
 
-        # safety clamp
-        mask = np.clip(mask, 0, 2)
+        mask_final[mask == 1] = 1   # pet
+        mask_final[mask == 2] = 2   # boundary
+        mask_final[mask == 3] = 0   # background
 
+        mask = mask_final
 
         # APPLY TRANSFORM
         augmented = self.transform(image=image, mask=mask)
