@@ -71,6 +71,19 @@ class OxfordIIITPetDataset(Dataset):
         # LOAD MASK
         mask = mpimg.imread(mask_path)
 
+        # convert to single channel if RGB
+        if len(mask.shape) == 3:
+            mask = mask[:, :, 0]
+
+        mask = mask.astype(np.uint8)
+
+        mask[mask == 1] = 0   # background
+        mask[mask == 2] = 1   # pet
+        mask[mask == 3] = 2   # boundary
+
+        # safety clamp
+        mask = np.clip(mask, 0, 2)
+
         # Convert RGB mask → single channel
         if len(mask.shape) == 3:
             mask = mask[:, :, 0]
