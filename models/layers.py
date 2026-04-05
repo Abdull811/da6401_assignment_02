@@ -4,19 +4,23 @@
 import torch
 import torch.nn as nn
 
-
 class CustomDropout(nn.Module):
-    """Custom Dropout layer.
+    """
+    Custom Dropout layer.
     """
 
-    def __init__(self, p: float = 0.5):
+    def __init__(self, p: float=0.5):
         """
         Initialize the CustomDropout layer.
 
         Args:
             p: Dropout probability.
         """
+        
         super().__init__()
+
+        # Validate probability
+        assert 0 <= p < 1, "Dropout probability must be in [0, 1)"
         self.p = p
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -29,8 +33,15 @@ class CustomDropout(nn.Module):
         Returns:
             Output tensor.
         """
-        if not self.training or self.p == 0.0:
-           return x
-        mask = (torch.rand_like(x) > self.p).float()
-        return x * mask / (1.0 - self.p)
         
+        # If in evaluation mode → no dropout
+        if not self.training or self.p == 0:
+            return x
+
+        # Create Bernoulli mask (same shape as input)
+        mask = (torch.rand_like(x) > self.p).float()
+
+        # Apply inverted dropout scaling
+        out = x * mask / (1 - self.p)
+
+        return out
