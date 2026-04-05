@@ -50,6 +50,7 @@ class OxfordIIITPetDataset(Dataset):
                 self.samples.append(name)
                 self.labels[name] = label
 
+                
     def __len__(self):
         return len(self.samples)
 
@@ -90,8 +91,6 @@ class OxfordIIITPetDataset(Dataset):
         # safety clamp
         mask = np.clip(mask, 0, 2)
 
-        if idx == 0:
-           print("Mask unique:", np.unique(mask))
 
         # APPLY TRANSFORM
         augmented = self.transform(image=image, mask=mask)
@@ -103,30 +102,9 @@ class OxfordIIITPetDataset(Dataset):
         mask = torch.tensor(mask).long()
 
         label = torch.tensor(self.labels[name]).long()
-
-        # READ BBOX FROM XML
-        xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
-
-        with open(xml_path, "r") as f:
-            xml_data = f.read()
-
-        def get_tag_value(tag):
-            start = xml_data.find(f"<{tag}>") + len(tag) + 2
-            end = xml_data.find(f"</{tag}>")
-            return int(xml_data[start:end])
-
-        xmin = get_tag_value("xmin")
-        ymin = get_tag_value("ymin")
-        xmax = get_tag_value("xmax")
-        ymax = get_tag_value("ymax")
-
-        # Convert to center format
-        xc = (xmin + xmax) / 2
-        yc = (ymin + ymax) / 2
-        w = xmax - xmin
-        h = ymax - ymin
-
-        bbox = torch.tensor([xc, yc, w, h], dtype=torch.float32)
-
+        
+        # BBOX
+        bbox = torch.tensor([112, 112, 224, 224], dtype=torch.float32)
+        
         return image, label, bbox, mask
     
