@@ -12,25 +12,8 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from models.vgg11 import VGG11
+from models.vgg11 import VGG11Encoder
 
-class DecoderBlock(nn.Module):
-    def __init__(self, in_channels, skip_channels, out_channels):
-        super().__init__()
-        self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
-        self.conv = nn.Sequential(
-            nn.Conv2d(out_channels + skip_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(),)
-
-    def forward(self, x, skip):
-        x = self.up(x)
-        x = torch.cat([x, skip], dim=1)
-        x = self.conv(x)
-        return x
 
 class VGG11UNet(nn.Module):
     """U-Net style segmentation network.
@@ -46,17 +29,35 @@ class VGG11UNet(nn.Module):
             dropout_p: Dropout probability for the segmentation head.
         """
         super().__init__()
-        # Extract high-level features from image
-        self.encoder = VGG11()
-        
-        # Upsample features back to image size
-        self.dec4 = DecoderBlock(512, 512, 512)
-        self.dec3 = DecoderBlock(512, 512, 256)
-        self.dec2 = DecoderBlock(256, 256, 128)
-        self.dec1 = DecoderBlock(128, 128, 64)
-        self.dec0 = DecoderBlock(64, 64, 32)
 
-        self.out_conv = nn.Conv2d(32, num_classes, kernel_size=1)
+        # Extract high-level features from image
+        self.encoder = VGG11Encoder(in_channels=in_channels)
+
+        # Decoder blocks
+        def conv_block(in_c, out_c):
+            return nn.Sequential(
+                nn.Conv2d(in_c, out_c, 3, padding=1),
+                nn.BatchNorm2d(out_c),
+                nn.ReLU(inplace=True)
+            )
+
+        self.up1 = nn.ConvTranspose2d(512, 512, 2, 2)
+        self.conv1 = conv_block(1024, 512)   # 512 + 512
+
+        self.up2 = nn.ConvTranspose2d(512, 256, 2, 2)
+        self.conv2 = conv_block(768, 256)    # 256 + 512
+
+        self.up3 = nn.ConvTranspose2d(256, 128, 2, 2)
+        self.conv3 = conv_block(384, 128)    # 128 + 256
+
+        self.up4 = nn.ConvTranspose2d(128, 64, 2, 2)
+        self.conv4 = conv_block(192, 64)     # 64 + 128
+
+        self.up5 = nn.ConvTranspose2d(64, 64, 2, 2)
+
+
+        self.final = nn.Conv2d(64, num_classes, 1)
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass for segmentation model.
@@ -67,11 +68,29 @@ class VGG11UNet(nn.Module):
             Segmentation logits [B, num_classes, H, W].
         """
         
-        x, features = self.encoder(x, return_features=True)
-        x = self.dec4(x, features["block5"])
-        x = self.dec3(x, features["block4"])
-        x = self.dec2(x, features["block3"])
-        x = self.dec1(x, features["block2"])
-        x = self.dec0(x, features["block1"])
-        x = self.out_conv(x)
-        return x
+        bottleneck, feats = self.encoder(x, return_features=True)
+
+        # 7 → 14
+        x = self.up1(bottleneck)
+        x = torch.cat([x, feats["enc5"]], dim=1)
+        x = self.conv1(x) 
+
+        # 14 → 28
+        x = self.up2(x)
+        x = torch.cat([x, feats["enc4"]], dim=1)
+        x = self.conv2(x)
+
+        # 28 → 56
+        x = self.up3(x)
+        x = torch.cat([x, feats["enc3"]], dim=1)
+        x = self.conv3(x)
+
+        # 56 → 112
+        x = self.up4(x)
+        x = torch.cat([x, feats["enc2"]], dim=1)
+        x = self.conv4(x)
+
+        x = self.up5(x)
+
+        return self.final(x)
+        
