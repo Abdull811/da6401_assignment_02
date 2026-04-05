@@ -75,8 +75,13 @@ class OxfordIIITPetDataset(Dataset):
         if len(mask.shape) == 3:
             mask = mask[:, :, 0]
 
-        mask = mask.astype(np.uint8)
+        # FIX FLOAT ISSUE (VERY IMPORTANT)
+        if mask.max() <= 1.0:
+            mask = (mask * 255).astype(np.uint8)
+        else:
+            mask = mask.astype(np.uint8)
 
+        # FINAL CORRECT LABEL MAPPING
         mask[mask == 1] = 0   # background
         mask[mask == 2] = 1   # pet
         mask[mask == 3] = 2   # boundary
@@ -84,18 +89,8 @@ class OxfordIIITPetDataset(Dataset):
         # safety clamp
         mask = np.clip(mask, 0, 2)
 
-        # Convert RGB mask → single channel
-        if len(mask.shape) == 3:
-            mask = mask[:, :, 0]
-
-        # Convert to integer
-        mask = mask.astype(np.int64)
-
-        # Ensure mask values are in {1,2,3}
-        mask = np.clip(mask, 1, 3)
-
-        # Convert (1,2,3) → (0,1,2)
-        mask = mask - 1
+        if idx == 0:
+           print("Mask unique:", np.unique(mask))
 
         # APPLY TRANSFORM
         augmented = self.transform(image=image, mask=mask)
