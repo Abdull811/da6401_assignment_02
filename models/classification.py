@@ -13,7 +13,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from models.layers import CustomDropout
-from models.vgg11 import VGG11
+from models.vgg11 import VGG11Encoder
 
 
 class VGG11Classifier(nn.Module):
@@ -30,13 +30,23 @@ class VGG11Classifier(nn.Module):
         
         super().__init__()
         # Encoder: Extract features from image using VGG11
-        self.encoder = VGG11()
+        self.encoder = VGG11Encoder(in_channels)
+        
+        # Classification head
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(512 * 7 * 7, 4096),
+            nn.BatchNorm1d(4096),
+            nn.ReLU(inplace=True),
+            CustomDropout(dropout_p),
 
-        # Classifier head: Convert extracted features into class predictions 
-        self.classifier = nn.Sequential( nn.Flatten(), # Convert C,H,W > 1D vector
-                                        nn.Linear(512*7*7, 4096), # fully connected layer
-                                        nn.ReLU(), CustomDropout(dropout_p), # activation + dropout for regularization
-                                        nn.Linear(4096, num_classes)) # final output layer (logits)
+            nn.Linear(4096, 4096),
+            nn.BatchNorm1d(4096),
+            nn.ReLU(inplace=True),
+            CustomDropout(dropout_p),
+
+            nn.Linear(4096, num_classes)
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass for classification model.
@@ -47,5 +57,8 @@ class VGG11Classifier(nn.Module):
         """
 
         x = self.encoder(x)
-        return self.classifier(x)
-    
+        x = self.classifier(x)
+        return x
+
+class VGG11(VGG11Encoder):
+    pass
