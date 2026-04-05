@@ -179,9 +179,9 @@ def train(dropout_p=0.5, freeze_mode="full"):
             seg_loss.backward()
             seg_opt.step()
 
-            total_cls += cls_loss.item()
-            total_loc += loc_loss.item()
-            total_seg += seg_loss.item()
+            total_cls += cls_loss.item() / len(train_loader)
+            total_loc += loc_loss.item() / len(train_loader)
+            total_seg += seg_loss.item() / len(train_loader)
 
             # PRINT STEP PROGRESS
             if step % 20 == 0:
@@ -212,10 +212,12 @@ def train(dropout_p=0.5, freeze_mode="full"):
         img = images[0].cpu()
         gt = masks[0].cpu()
         pred = torch.argmax(seg_out[0], dim=0).cpu()
-        with torch.no_grad(): # Feature map
+        with torch.no_grad():
             feature = segmenter.encoder(images)
 
         feature = feature.detach().cpu()
+
+        # convert [512,7,7] → [7,7]
         fm = feature[0].mean(dim=0)
 
         iou = compute_iou(
@@ -230,7 +232,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
             "train_seg_loss": total_seg,
             "val_dice": dice_avg,
             "val_pixel_acc": acc_avg,
-            "feature_map": wandb.Image(feature[0].cpu().numpy()),
+            "feature_map": wandb.Image(fm.numpy()),
             "iou": iou,
             # Image
             "input": wandb.Image(img.permute(1,2,0).numpy()),
