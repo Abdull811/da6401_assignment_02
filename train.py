@@ -29,14 +29,14 @@ from models.segmentation import VGG11UNet
 from losses.iou_loss import IoULoss
 
 
-# CONFIG 
+# Configuration
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 8
 EPOCHS = 2
 LR = 1e-4
 
 
-# METRICS 
+# Metrics
 def dice_score(pred, target):
     pred = torch.argmax(pred, dim=1)
     dice = 0
@@ -82,7 +82,7 @@ def compute_iou(box1, box2):
     return inter / (union + 1e-6)
 
 
-# TRAIN 
+# Train 
 def train(dropout_p=0.5, freeze_mode="full"):
 
     wandb.init(
@@ -94,7 +94,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
     print("W&B RUN:", wandb.run.url)
 
 
-    # DATA
+    # Data
     train_loader = DataLoader(
         OxfordIIITPetDataset("data", "train"),
         batch_size=BATCH_SIZE, shuffle=True
@@ -104,34 +104,35 @@ def train(dropout_p=0.5, freeze_mode="full"):
         batch_size=BATCH_SIZE
     )
 
-    # MODELS
+    # Models
     classifier = VGG11Classifier(dropout_p=dropout_p).to(DEVICE)
     localizer = VGG11Localizer(dropout_p=dropout_p).to(DEVICE)
     segmenter = VGG11UNet(dropout_p=dropout_p).to(DEVICE)
 
     # Transfer Learning control
+    # Freeze modes
     if freeze_mode == "freeze":
         for p in segmenter.encoder.parameters():
             p.requires_grad = False
 
     elif freeze_mode == "partial":
-        for i, p in enumerate(segmenter.encoder.parameters()):
-            if i < len(list(segmenter.encoder.parameters())) // 2:
-                p.requires_grad = False
+        params = list(segmenter.encoder.parameters())
+        for p in params[:len(params)//2]:
+            p.requires_grad = False
 
-    # LOSSES
+    # Losses
     cls_loss_fn = nn.CrossEntropyLoss()
     loc_loss_fn = nn.MSELoss()
     iou_loss_fn = IoULoss()
     seg_loss_fn = nn.CrossEntropyLoss()
 
-    # OPTIMIZERS
+    # Optimizers
     cls_opt = optim.Adam(classifier.parameters(), lr=LR)
     loc_opt = optim.Adam(localizer.parameters(), lr=LR)
     seg_opt = optim.Adam(segmenter.parameters(), lr=LR)
 
     
-    # TRAIN LOOP
+    # Train Loop
     for epoch in range(EPOCHS):
 
         print(f"\n===== EPOCH {epoch+1}/{EPOCHS} =====")
@@ -142,9 +143,9 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
         total_cls = total_loc = total_seg = 0
 
-        for st, (images, labels, bboxes, masks) in enumerate(train_loader):
+        for step, (images, labels, bboxes, masks) in enumerate(train_loader):
 
-            if st == 0:  # Print shapes and stats for the first batch
+            if step == 0:  # Print shapes and stats for the first batch
                 print("Image shape:", images.shape)
                 print("Mask shape:", masks.shape)
                 print("Mask unique values:", masks.unique())
@@ -154,7 +155,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
             bboxes = bboxes.to(DEVICE)
             masks = masks.to(DEVICE)
 
-            # CLASSIFICATION
+            # Classification
             cls_out = classifier(images)
             cls_loss = cls_loss_fn(cls_out, labels)
 
@@ -162,7 +163,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
             cls_loss.backward()
             cls_opt.step()
 
-            # LOCALIZATION
+            # Localization
             loc_out = localizer(images)
             loc_loss = loc_loss_fn(loc_out, bboxes) + iou_loss_fn(loc_out, bboxes)
 
@@ -170,7 +171,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
             loc_loss.backward()
             loc_opt.step()
 
-            # SEGMENTATION
+            # Segmentation
             seg_out = segmenter(images)
             seg_loss = seg_loss_fn(seg_out, masks) + dice_loss(seg_out, masks)
 
@@ -183,8 +184,8 @@ def train(dropout_p=0.5, freeze_mode="full"):
             total_seg += seg_loss.item()
 
             # PRINT STEP PROGRESS
-            if st % 20 == 0:
-                print(f"[Step {st}] CLS: {cls_loss:.3f} | LOC: {loc_loss:.3f} | SEG: {seg_loss:.3f}")
+            if step % 20 == 0:
+                print(f"[Step {step}] CLS: {cls_loss:.3f} | LOC: {loc_loss:.3f} | SEG: {seg_loss:.3f}")
 
         # VALIDATION
         classifier.eval()
@@ -194,7 +195,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
         dice_total = acc_total = 0
 
         with torch.no_grad():
-            for step, (images, labels, bboxes, masks) in enumerate(val_loader):
+            for images, labels, bboxes, masks in val_loader:
 
                 images = images.to(DEVICE)
                 masks = masks.to(DEVICE)
@@ -211,8 +212,16 @@ def train(dropout_p=0.5, freeze_mode="full"):
         img = images[0].cpu()
         gt = masks[0].cpu()
         pred = torch.argmax(seg_out[0], dim=0).cpu()
-        feature = segmenter.encoder(images)
-        iou = compute_iou(loc_out[0].cpu().numpy(), bboxes[0].cpu().numpy())
+        with torch.no_grad(): # Feature map
+            feature = segmenter.encoder(images)
+
+        feature = feature.detach().cpu()
+        fm = feature[0].mean(dim=0)
+
+        iou = compute_iou(
+            loc_out[0].detach().cpu().numpy(),
+            bboxes[0].detach().cpu().numpy()
+        )
 
         wandb.log({
             "epoch": epoch,
@@ -223,15 +232,13 @@ def train(dropout_p=0.5, freeze_mode="full"):
             "val_pixel_acc": acc_avg,
             "feature_map": wandb.Image(feature[0].cpu().numpy()),
             "iou": iou,
-            "segmentation": [
-                wandb.Image(img.permute(1,2,0).numpy(), caption="Input"),
-                wandb.Image(gt.numpy(), caption="Ground Truth"),
-                wandb.Image(pred.numpy(), caption="Prediction")
-            ],
-        "sample_image": wandb.Image(img.permute(1,2,0).numpy(), caption="Sample Input"),
-        "batch_images": [
-        wandb.Image(feature[0].cpu().numpy())
-        for i in range(3)]   
+            # Image
+            "input": wandb.Image(img.permute(1,2,0).numpy()),
+            "gt_mask": wandb.Image(gt.numpy()),
+            "pred_mask": wandb.Image(pred.numpy()),
+
+            # Feature map (FIXED)
+            "feature_map": wandb.Image(fm.numpy())   
         })
 
         print(f"\nEpoch {epoch+1} DONE → CLS={total_cls:.3f}, LOC={total_loc:.3f}, SEG={total_seg:.3f}")
