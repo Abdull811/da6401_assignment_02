@@ -31,7 +31,9 @@ class OxfordIIITPetDataset(Dataset):
 
         # TRANSFORM
         self.transform = A.Compose([
-            A.Resize(224, 224)
+            A.Resize(224, 224),
+            A.Normalize(mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225))
         ])
 
         self.samples = []
@@ -75,7 +77,6 @@ class OxfordIIITPetDataset(Dataset):
         if len(mask.shape) == 3:
             mask = mask[:, :, 0]
 
-        # FIX FLOAT ISSUE (VERY IMPORTANT)
         if mask.max() <= 1.0:
             mask = (mask * 255).astype(np.uint8)
         else:
@@ -103,8 +104,29 @@ class OxfordIIITPetDataset(Dataset):
 
         label = torch.tensor(self.labels[name]).long()
 
-        # Dummy bounding box (center format)
-        bbox = torch.tensor([112, 112, 224, 224], dtype=torch.float32)
+        # READ BBOX FROM XML
+        xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
+
+        with open(xml_path, "r") as f:
+            xml_data = f.read()
+
+        def get_tag_value(tag):
+            start = xml_data.find(f"<{tag}>") + len(tag) + 2
+            end = xml_data.find(f"</{tag}>")
+            return int(xml_data[start:end])
+
+        xmin = get_tag_value("xmin")
+        ymin = get_tag_value("ymin")
+        xmax = get_tag_value("xmax")
+        ymax = get_tag_value("ymax")
+
+        # Convert to center format
+        xc = (xmin + xmax) / 2
+        yc = (ymin + ymax) / 2
+        w = xmax - xmin
+        h = ymax - ymin
+
+        bbox = torch.tensor([xc, yc, w, h], dtype=torch.float32)
 
         return image, label, bbox, mask
     
