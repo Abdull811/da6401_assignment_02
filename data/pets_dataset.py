@@ -1,105 +1,102 @@
-"""Dataset skeleton for Oxford-IIIT Pet.
-"""
+"""Dataset loader for Oxford-IIIT Pet"""
 
 import os
 import torch
-from torch.utils.data import Dataset
 import numpy as np
+from torch.utils.data import Dataset
 import matplotlib.image as mpimg
 import albumentations as A
 
 
 class OxfordIIITPetDataset(Dataset):
-    """Oxford-IIIT Pet multi-task dataset loader skeleton."""
-    
-    def __init__(self, images_dir, masks_dir, labels_dict, bboxes_dict, image_files=None):
-        """
-        Initialize dataset.
-            images_dir: Path to directory containing input images.
-            masks_dir: Path to directory containing segmentation masks.
-            labels_dict: Dictionary mapping image filename > class label.
-            bboxes_dict: Dictionary mapping image filename > bounding box [x1, y1, x2, y2].
-        """ 
-        # Store paths
+    """
+    Multi-task dataset:
+    - classification (breed)
+    - localization (dummy bbox)
+    - segmentation (trimap)
+    """
 
-        self.images_dir = images_dir
-        self.masks_dir = masks_dir
-        self.labels_dict = labels_dict
-        self.bboxes_dict = bboxes_dict
-        
-        # List of image filenames
-        self.image_files = image_files if image_files is not None else sorted(labels_dict.keys())
+    def __init__(self, root, split="train"):
+        self.root = root
+        self.split = split
 
-        # Resize to fixed size (224 * 224) and normalize pixel values
+        # PATHS
+        self.images_dir = os.path.join(root, "images")
+        self.masks_dir = os.path.join(root, "annotations", "trimaps")
+
+        if split == "train":
+            self.split_file = os.path.join(root, "annotations", "trainval.txt")
+        elif split == "val":
+            self.split_file = os.path.join(root, "annotations", "test.txt")
+
+        # TRANSFORM
         self.transform = A.Compose([
-                A.Resize(224, 224),
-                A.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
+            A.Resize(224, 224)
+        ])
 
+        self.samples = []
+        self.labels = {}
+
+        # LOAD SPLIT
+        with open(self.split_file, "r") as f:
+            for line in f:
+                parts = line.strip().split()
+
+                name = parts[0]
+                label = int(parts[1]) - 1  # 0-based
+
+                self.samples.append(name)
+                self.labels[name] = label
 
     def __len__(self):
-        # Return total number of samples in dataset
-        return len(self.image_files)
+        return len(self.samples)
 
     def __getitem__(self, idx):
-        # Get image filename for index
-        img_name = self.image_files[idx]
+        name = self.samples[idx]
 
-        img_path = os.path.join(self.images_dir, img_name)
-        mask_path = os.path.join(self.masks_dir, os.path.splitext(img_name)[0] + ".png")
+        img_path = os.path.join(self.images_dir, name + ".jpg")
+        mask_path = os.path.join(self.masks_dir, name + ".png")
 
-        # Load image and mask
-        img = mpimg.imread(img_path)
+        # LOAD IMAGE
+        image = mpimg.imread(img_path).astype(np.float32)
+
+        # Remove alpha channel (RGBA → RGB)
+        if len(image.shape) == 3 and image.shape[2] == 4:
+            image = image[:, :, :3]
+
+        # Normalize image to [0,1]
+        if image.max() > 1:
+            image = image / 255.0
+
+        # LOAD MASK
         mask = mpimg.imread(mask_path)
 
-        if img.dtype != np.float32:
-            img = img.astype(np.float32)
-
-        if img.max() > 1.0:
-            img = img / 255.0
-
-        if len(img.shape) == 2:
-            img = np.stack([img, img, img], axis=-1)
-
-        if img.shape[2] > 3:
-            img = img[:, :, :3]
-
-        if mask.ndim == 3:
+        # Convert RGB mask → single channel
+        if len(mask.shape) == 3:
             mask = mask[:, :, 0]
 
-        orig_h, orig_w = img.shape[0], img.shape[1]
-
-
-        # Apply image transform
-        transformed = self.transform(image=img)
-        img = transformed["image"]
-
-        # Resize mask separately using nearest-neighbor
-        mask = mask.astype(np.float32)
-        mask = A.Resize(224, 224, interpolation=0)(image=mask)["image"]
+        # Convert to integer
         mask = mask.astype(np.int64)
-        mask = np.clip(mask - 1, 0, 2)
 
-        # Convert image to torch tensor
-        img = torch.tensor(img).permute(2, 0, 1).float()
+        # Ensure mask values are in {1,2,3}
+        mask = np.clip(mask, 1, 3)
 
-        # Load label
-        label = torch.tensor(self.labels_dict[img_name]).long()
+        # Convert (1,2,3) → (0,1,2)
+        mask = mask - 1
 
-        # Load and resize bbox from [x1, y1, x2, y2] to [x_center, y_center, width, height]
-        x1, y1, x2, y2 = self.bboxes_dict[img_name]
+        # APPLY TRANSFORM
+        augmented = self.transform(image=image, mask=mask)
+        image = augmented["image"]
+        mask = augmented["mask"]
 
-        x1 = x1 * 224.0 / orig_w
-        x2 = x2 * 224.0 / orig_w
-        y1 = y1 * 224.0 / orig_h
-        y2 = y2 * 224.0 / orig_h
-
-        x_center = (x1 + x2) / 2.0
-        y_center = (y1 + y2) / 2.0
-        width = x2 - x1
-        height = y2 - y1
-
-        bbox = torch.tensor([x_center, y_center, width, height]).float()
+        # TO TENSOR
+        image = torch.tensor(image).permute(2, 0, 1)
         mask = torch.tensor(mask).long()
 
-        # Return all components for multi-task
-        return img, label, bbox, mask
+        label = torch.tensor(self.labels[name]).long()
+
+        # Dummy bounding box (center format)
+        bbox = torch.tensor([112, 112, 224, 224], dtype=torch.float32)
+
+        return image, label, bbox, mask
+    
