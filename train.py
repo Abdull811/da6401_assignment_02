@@ -53,6 +53,22 @@ def colorize_mask(mask):
 
     return colored
     
+def draw_box(img, box, color):
+    img = img.copy()
+    xc, yc, w, h = box
+
+    x1 = int(xc - w/2)
+    y1 = int(yc - h/2)
+    x2 = int(xc + w/2)
+    y2 = int(yc + h/2)
+
+    # Draw rectangle manually
+    img[y1:y1+2, x1:x2] = color
+    img[y2-2:y2, x1:x2] = color
+    img[y1:y2, x1:x1+2] = color
+    img[y1:y2, x2-2:x2] = color
+
+    return img
 
 # Metrics
 def dice_score(pred, target):
@@ -222,6 +238,22 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
                 dice_total += dice_score(seg_out, masks)
                 acc_total += pixel_accuracy(seg_out, masks)
+                
+                # Activation Histogram of 3rd conv layer
+                x_act = images
+                
+                x_act = classifier.encoder.conv1(x_act)
+                x_act = classifier.encoder.pool1(x_act)
+                
+                x_act = classifier.encoder.conv2(x_act)
+                x_act = classifier.encoder.pool2(x_act)
+                
+                x_act = classifier.encoder.conv3(x_act)
+                
+                wandb.log({
+                    "conv3_activation": wandb.Histogram(x_act.detach().cpu().numpy())
+                })
+        
 
         dice_avg = dice_total / len(val_loader)
         acc_avg = acc_total / len(val_loader)
@@ -259,6 +291,14 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
         # SEGMENTATION VISUALIZATION (W&B)
         img_vis = denormalize(vis_images[0])
+
+        img_np = (img_vis * 255).astype(np.uint8)
+
+        gt_box = bboxes[0].cpu().numpy()
+        pred_box = loc_out[0].detach().cpu().numpy()
+        
+        img_gt = draw_box(img_np, gt_box, [0,255,0])     # green GT
+        img_pred = draw_box(img_gt, pred_box, [255,0,0]) # red pred
         
         gt = vis_masks[0].cpu()
         pred = torch.argmax(seg_out[0], dim=0).cpu()
@@ -275,6 +315,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
         iou = compute_iou(
             loc_out[0].detach().cpu().numpy(),
             bboxes[0].detach().cpu().numpy())
+        
 
         wandb.log({
             "epoch": epoch,
@@ -286,7 +327,8 @@ def train(dropout_p=0.5, freeze_mode="full"):
             "iou": iou,
             
             # Image
-            "input": wandb.Image(img_vis),
+            "input": wandb.Image(img_np),
+            "bbox_visualization": wandb.Image(img_pred),
             "gt_mask": wandb.Image(colorize_mask(gt.numpy())),
             "pred_mask": wandb.Image(colorize_mask(pred.numpy())),
             "first_layer_feature": wandb.Image(
