@@ -17,10 +17,10 @@ The system uses a **VGG11-based architecture** with task-specific heads and incl
 ```
 da6401_assignment_02/
 │
-├── data/
-│   └── pets_dataset.py
 ├── checkpoints
 │   └── checkpoints.md
+├── data/
+│   └── pets_dataset.py
 ├── models/
 │   ├── vgg11.py
 │   ├── classification.py
