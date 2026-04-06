@@ -234,8 +234,14 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
         # SEGMENTATION VISUALIZATION (W&B)
         img = images[0].cpu()
-        img_vis = img.permute(1,2,0).numpy()
-        img_vis = (img_vis - img_vis.min()) / (img_vis.max() - img_vis.min() + 1e-6)
+        # UN-NORMALIZE (CRITICAL FIX)
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(3,1,1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(3,1,1)
+        
+        img_vis = img * std + mean
+        img_vis = img_vis.clamp(0,1)
+        
+        img_vis = img_vis.permute(1,2,0).numpy()
         gt = masks[0].cpu()
         pred = torch.argmax(seg_out[0], dim=0).cpu()
         with torch.no_grad():
@@ -279,8 +285,11 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
         for i in range(min(5, images.shape[0])):
             img_i = images[i].cpu()
+
+            img_i = img_i * std + mean
+            img_i = img_i.clamp(0,1)
+            
             img_i = img_i.permute(1,2,0).numpy()
-            img_i = (img_i - img_i.min()) / (img_i.max() - img_i.min() + 1e-6)
             iou_i = compute_iou(
                 loc_out[i].detach().cpu().numpy(),
                 bboxes[i].detach().cpu().numpy()
