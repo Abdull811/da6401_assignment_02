@@ -6,6 +6,8 @@ import wandb
 from models.multitask import MultiTaskPerceptionModel
 import matplotlib.image as mpimg
 import numpy as np
+import albumentations as A
+
 
 os.environ["WANDB_API_KEY"] = "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"
 
@@ -30,10 +32,19 @@ def colorize_mask(mask):
     return colored
 
 # Load image
+transform = A.Compose([
+    A.Resize(224, 224),
+    A.Normalize(mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225))
+])
+
 img = mpimg.imread("data/images/Abyssinian_1.jpg").astype(np.float32)
 
 if img.max() > 1:
     img = img / 255.0
+
+aug = transform(image=img)
+img = aug["image"]
 
 img_tensor = torch.tensor(img).permute(2,0,1).unsqueeze(0)
 
