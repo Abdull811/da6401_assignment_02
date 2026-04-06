@@ -218,8 +218,8 @@ def train(dropout_p=0.5, freeze_mode="full"):
         acc_avg = acc_total / len(val_loader)
         vis_images = images
         vis_masks = masks
-
-       with torch.no_grad():
+        
+        with torch.no_grad():
             x = images
         
             # Block 1
