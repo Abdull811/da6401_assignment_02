@@ -34,8 +34,8 @@ class MultiTaskPerceptionModel(nn.Module):
         #self.encoder = VGG11Encoder(in_channels)
 
         # Head
-        self.classifier_head = VGG11Classifier(num_breeds)
-        self.localizer_head = VGG11Localizer()
+        self.classifier_head = VGG11Classifier(num_breeds).classifier
+        self.localizer_head = VGG11Localizer().head
         self.segmenter = VGG11UNet(seg_classes)
 
         # Load pretrained weights
@@ -65,13 +65,13 @@ class MultiTaskPerceptionModel(nn.Module):
         """
         
         # Shared feature extraction
-        #features = self.encoder(x)
+        features = self.encoder(x)
 
         # Classification
-        cls_out = self.classifier_head(x)
+        cls_out = self.classifier_head(features)
 
         # Localization
-        loc_out = self.localizer_head(x)
+        loc_out = self.localizer_head(features)
 
         # Segmentation
         seg_out = self.segmenter(x)
