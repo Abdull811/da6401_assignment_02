@@ -378,12 +378,12 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
 # RUN
 if __name__ == "__main__":
-    train(dropout_p=0.5, freeze_mode="full")
+    #train(dropout_p=0.5, freeze_mode="full")
     
     # DROPOUT EXPERIMENTS
-    #for d in [0.0, 0.2, 0.5]:
-     #   train(dropout_p=d, freeze_mode="full")
+    for d in [0.0, 0.2, 0.5]:
+        train(dropout_p=d, freeze_mode="full")
 
     # TRANSFER LEARNING EXPERIMENTS
-    #for mode in ["freeze", "partial", "full"]:
-     #   train(dropout_p=0.5, freeze_mode=mode)    
+    for mode in ["freeze", "partial", "full"]:
+        train(dropout_p=0.5, freeze_mode=mode)    
