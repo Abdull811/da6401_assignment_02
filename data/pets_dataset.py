@@ -74,11 +74,11 @@ class OxfordIIITPetDataset(Dataset):
         # LOAD MASK
         mask = mpimg.imread(mask_path)
         
-        # Convert to single channel
+        # Convert to single channel if needed
         if len(mask.shape) == 3:
             mask = mask[:, :, 0]
         
-        # Convert properly
+        # Convert properly to uint8
         if mask.max() <= 1.0:
             mask = (mask * 255).astype(np.uint8)
         else:
