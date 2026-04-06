@@ -1,46 +1,234 @@
-# DA6401 Assignment-2 Skeleton Guide
+# DA6401 Assignment 02 — Multi-Task Perception Model
 
-This repository is an instructional skeleton for building the complete visual perception pipeline on Oxford-IIIT Pet.
+## Overview
 
+This project implements a **multi-task deep learning system** on the **Oxford-IIIT Pet Dataset**, solving three tasks simultaneously:
 
-### ADDITIONAL INSTRUCTIONS FOR ASSIGNMENT2:
-- Ensure VGG11 is implemented according to the official paper(https://arxiv.org/abs/1409.1556). The only difference being injecting BatchNorm and CustomDropout layers is your design choice.
-- Train all the networks on normalized images as input (as the test set given by autograder will be normalized images).
-- The output of Localization model = [x_center, y_center, width, height] all these numbers are with respect to image coordinates, in pixel space (not normalized)
-- Train the object localization network with the following loss function: MSE + custom_IOU_loss.
-- Make sure the custom_IOU loss is in range: [0,1]
-- In the custom IOU loss, you have to implement all the two reduction types: ["mean", "sum"] and the default reduction type should be "mean". You may include any other reduction type as well, which will help your network learn better.
-- multitask.py shd load the saved checkpoints (classifier.pth, localizer.pth, unet.pth), initialize the shared backbone and heads with these trained weights and do prediction.
-- Keep paths as relative paths for loading in multitask.py
-- Assume input image size is fixed according to vgg11 paper(can be hardcoded need not pass as args)
-- Stick to the arguments of the functions and classes given in the github repo, if you include any additional arguments make sure they always have some default value.
-- Do not import any other python packages apart from the ones mentioned in assignment pdf, if you do so the autograder will instantly crash and your submission will not be evaluated.
-- The following classes will be used by autograder: 
-    ```
-        from models.vgg11 import VGG11
-        from models.layers import CustomDropout
-        from losses.iou_loss import IoULoss
-        from multitask import MultiTaskPerceptionModel
-    ```
-- The submission link for this assignment will be available by Saturday(04/04/2026) on gradescope
+* **Classification** → Predict pet breed (37 classes)
+* **Localization** → Predict bounding box
+* **Segmentation** → Pixel-wise mask prediction
 
-
-
-
-
-### GENERAL INSTRUCTIONS:
-- From this assignment onwards, if we find any wandb report which is private/inaccessible while grading, there wont be any second chance, that submission will be marked 0 for wandb marks.
-- The entireity of plots presented in the wandb report should be interactive and logged in the wandb project. Any screenshot or images of plots will straightly be marked 0 for that question.
-- Gradescope offers an option to activate whichever submission you want to, and that submission will be used for evaluation. Under any circumstances, no requests to be raised to TAs to activate any of your prior submissions. It is the student's responsibility to do so(if required) before submission deadline.
-- Assignment2 discussion forum has been opened on moodle for any doubt clarification/discussion.   
-
-
-
-
-## Contact
-
-For questions or issues, please contact the teaching staff or post on the course forum.
+The system uses a **VGG11-based architecture** with task-specific heads and includes full **training, evaluation, visualization, and inference pipeline**.
 
 ---
 
-Good luck with your implementation!
+## Project Structure
+
+```
+da6401_assignment_02/
+│
+├── data/
+│   └── pets_dataset.py
+├── checkpoints
+│   └── checkpoints.md
+├── models/
+│   ├── vgg11.py
+│   ├── classification.py
+│   ├── localization.py
+│   ├── segmentation.py
+│   ├── multitask.py
+│   └── layers.py
+│
+├── losses/
+│   ├── iou_loss.py
+│   └── __init__.py
+│
+├── train.py
+├── inference.py
+├── requirements.txt
+├── README.md
+└── *.pth (generated after training)
+```
+
+---
+
+## Installation
+
+```
+
+### Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## Dataset Setup
+
+Download Oxford-IIIT Pet dataset:
+
+ https://www.robots.ox.ac.uk/~vgg/data/pets/
+
+Extract into:
+
+```
+data/
+├── images/
+├── annotations/
+│   ├── trimaps/
+│   ├── trainval.txt
+│   └── test.txt
+```
+
+---
+
+## Training
+
+Run training:
+
+```bash
+python train.py
+```
+
+### Training includes:
+
+* Classification loss (CrossEntropy)
+* Localization loss (MSE + IoU)
+* Segmentation loss (CrossEntropy + Dice)
+* W&B logging (metrics + images)
+
+---
+
+## Weights & Biases (W&B)
+
+Login before running:
+
+```bash
+wandb login
+```
+
+Project name:
+
+```
+da6401_Assigment_02_Weight_&_Biase
+```
+
+### Logged metrics:
+
+* Classification loss
+* Localization loss
+* Segmentation loss
+* Dice score
+* Pixel accuracy
+* IoU
+
+### Logged visuals:
+
+* Input images
+* Ground truth masks
+* Predicted masks
+* Feature maps
+* IoU table
+
+---
+
+## Model Architecture
+
+### Backbone
+
+* VGG11 Encoder
+
+### Heads
+
+* Classification Head → Fully connected layers
+* Localization Head → Bounding box regression
+* Segmentation Head → U-Net decoder
+
+---
+
+## Loss Functions
+
+| Task           | Loss                     |
+| -------------- | ------------------------ |
+| Classification | CrossEntropy             |
+| Localization   | MSE + IoU Loss           |
+| Segmentation   | CrossEntropy + Dice Loss |
+
+---
+
+## Metrics
+
+* Dice Score
+* Pixel Accuracy
+* IoU (Bounding Box)
+
+---
+
+## Inference
+
+Run:
+
+```bash
+python inference.py
+```
+
+### Output:
+
+* Predicted segmentation mask
+* Logged to W&B
+
+---
+
+## Checkpoints
+
+After training, the following files are generated:
+
+```
+classifier.pth
+localizer.pth
+unet.pth
+```
+
+These are required for:
+
+* Evaluation
+* Multi-task model initialization
+
+---
+
+## Multi-Task Model
+
+The `MultiTaskPerceptionModel` combines:
+
+* Classification
+* Localization
+* Segmentation
+
+into a single forward pass:
+
+```python
+output = model(image)
+
+output["classification"]
+output["localization"]
+output["segmentation"]
+```
+
+---
+
+
+
+## Notes
+
+* Ensure dataset path is correct (`data/`)
+* Do NOT include `.pth` files in GitHub (large files)
+* Use `.gitignore` for:
+
+  ```
+  data/
+  *.pth
+  wandb/
+  ```
+
+## Conclusion
+
+This project demonstrates a complete **multi-task deep learning pipeline**, integrating:
+
+* Classification
+* Localization
+* Segmentation
+
+with proper training, evaluation, and visualization tools.
+
+---
