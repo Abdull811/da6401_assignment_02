@@ -15,7 +15,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-
 np.random.seed(42)
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -35,6 +34,16 @@ BATCH_SIZE = 8
 EPOCHS = 10
 LR = 1e-4
 
+# GLOBAL NORMALIZATION FIX
+mean = torch.tensor([0.485, 0.456, 0.406]).view(3,1,1)
+std = torch.tensor([0.229, 0.224, 0.225]).view(3,1,1)
+
+def denormalize(img):
+    img = img.cpu()
+    img = img * std + mean
+    img = img.clamp(0,1)
+    return img.permute(1,2,0).numpy()
+    
 
 # Metrics
 def dice_score(pred, target):
@@ -195,7 +204,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
         dice_total = acc_total = 0
 
         with torch.no_grad():
-            for images, labels, bboxes, masks in val_loader:
+            for batch_idx, (images, labels, bboxes, masks) in enumerate(val_loader):
 
                 images = images.to(DEVICE)
                 masks = masks.to(DEVICE)
@@ -207,6 +216,8 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
         dice_avg = dice_total / len(val_loader)
         acc_avg = acc_total / len(val_loader)
+        vis_images = images
+        vis_masks = masks
 
         with torch.no_grad():
             x = images
@@ -233,16 +244,9 @@ def train(dropout_p=0.5, freeze_mode="full"):
             last_map = x_last[0].mean(dim=0).detach().cpu()
 
         # SEGMENTATION VISUALIZATION (W&B)
-        img = images[0].cpu()
-        # UN-NORMALIZE (CRITICAL FIX)
-        mean = torch.tensor([0.485, 0.456, 0.406]).view(3,1,1)
-        std = torch.tensor([0.229, 0.224, 0.225]).view(3,1,1)
+        img_vis = denormalize(vis_images[0])
         
-        img_vis = img * std + mean
-        img_vis = img_vis.clamp(0,1)
-        
-        img_vis = img_vis.permute(1,2,0).numpy()
-        gt = masks[0].cpu()
+        gt = vis_masks[0].cpu()
         pred = torch.argmax(seg_out[0], dim=0).cpu()
         with torch.no_grad():
             feature = segmenter.encoder(images)
@@ -251,10 +255,12 @@ def train(dropout_p=0.5, freeze_mode="full"):
         # convert [512,7,7] → [7,7]
         fm = feature[0].mean(dim=0)
 
+        fm_vis = fm.numpy()
+        fm_vis = (fm_vis - fm_vis.min()) / (fm_vis.max() - fm_vis.min() + 1e-6)
+        
         iou = compute_iou(
             loc_out[0].detach().cpu().numpy(),
-            bboxes[0].detach().cpu().numpy()
-        )
+            bboxes[0].detach().cpu().numpy())
 
         wandb.log({
             "epoch": epoch,
@@ -269,27 +275,24 @@ def train(dropout_p=0.5, freeze_mode="full"):
             "input": wandb.Image(img_vis),
             "gt_mask": wandb.Image(gt.numpy()),
             "pred_mask": wandb.Image(pred.numpy()),
+            "first_layer_feature": wandb.Image(first_map.numpy()),
+            "last_layer_feature": wandb.Image(last_map.numpy()),
 
             # Feature map (FIXED)
-            "feature_map": wandb.Image(fm.numpy() * 120)   
+            "feature_map": wandb.Image(fm_vis)   
         })
 
-        for i in range(min(3, images.shape[0])):
+        for i in range(min(3, vis_images.shape[0])):
             wandb.log({
-                f"sample_{i}_input": wandb.Image(images[i].cpu().permute(1,2,0).numpy()),
-                f"sample_{i}_gt": wandb.Image(masks[i].cpu().numpy() * 100),
+                f"sample_{i}_input": wandb.Image(denormalize(vis_images[i])),
+                f"sample_{i}_gt": wandb.Image(vis_masks[i].cpu().numpy() * 100),
                 f"sample_{i}_pred": wandb.Image(torch.argmax(seg_out[i], dim=0).cpu().numpy() * 100)
             })
 
         table = wandb.Table(columns=["image", "iou"])
 
-        for i in range(min(5, images.shape[0])):
-            img_i = images[i].cpu()
-
-            img_i = img_i * std + mean
-            img_i = img_i.clamp(0,1)
-            
-            img_i = img_i.permute(1,2,0).numpy()
+        for i in range(min(5, vis_images.shape[0])):
+            img_i = denormalize(vis_images[i])
             iou_i = compute_iou(
                 loc_out[i].detach().cpu().numpy(),
                 bboxes[i].detach().cpu().numpy()
