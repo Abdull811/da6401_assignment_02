@@ -19,8 +19,10 @@ da6401_assignment_02/
 │
 ├── checkpoints
 │   └── checkpoints.md
+│
 ├── data/
 │   └── pets_dataset.py
+│
 ├── models/
 │   ├── vgg11.py
 │   ├── classification.py
