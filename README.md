@@ -10,6 +10,11 @@ This project implements a **multi-task deep learning system** on the **Oxford-II
 
 The system uses a **VGG11-based architecture** with task-specific heads and includes full **training, evaluation, visualization, and inference pipeline**.
 
+## Repository
+* GitHub Repository: [https://github.com/Abdull811/DA6401_assigment_01.git]
+* Weights & Biases Run Link: View Run on W&B [https://wandb.ai/ge26z811-zan/da6401_Assigment_02_Weight_&_Biase?nw=nwuserge26z811]
+
+
 ---
 
 ## Project Structure
