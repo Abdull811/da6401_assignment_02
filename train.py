@@ -234,6 +234,8 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
         # SEGMENTATION VISUALIZATION (W&B)
         img = images[0].cpu()
+        img_vis = img.permute(1,2,0).numpy()
+        img_vis = (img_vis - img_vis.min()) / (img_vis.max() - img_vis.min() + 1e-6)
         gt = masks[0].cpu()
         pred = torch.argmax(seg_out[0], dim=0).cpu()
         with torch.no_grad():
@@ -256,8 +258,9 @@ def train(dropout_p=0.5, freeze_mode="full"):
             "val_dice": dice_avg,
             "val_pixel_acc": acc_avg,
             "iou": iou,
+            
             # Image
-            "input": wandb.Image(img.permute(1,2,0).numpy()),
+            "input": wandb.Image(img_vis),
             "gt_mask": wandb.Image(gt.numpy()),
             "pred_mask": wandb.Image(pred.numpy()),
 
@@ -275,7 +278,9 @@ def train(dropout_p=0.5, freeze_mode="full"):
         table = wandb.Table(columns=["image", "iou"])
 
         for i in range(min(5, images.shape[0])):
-            img_i = images[i].cpu().permute(1,2,0).numpy()
+            img_i = images[i].cpu()
+            img_i = img_i.permute(1,2,0).numpy()
+            img_i = (img_i - img_i.min()) / (img_i.max() - img_i.min() + 1e-6)
             iou_i = compute_iou(
                 loc_out[i].detach().cpu().numpy(),
                 bboxes[i].detach().cpu().numpy()
@@ -297,11 +302,12 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
 # RUN
 if __name__ == "__main__":
+    train(dropout_p=0.5, freeze_mode="full")
     
     # DROPOUT EXPERIMENTS
-    for d in [0.0, 0.2, 0.5]:
-        train(dropout_p=d, freeze_mode="full")
+    #for d in [0.0, 0.2, 0.5]:
+     #   train(dropout_p=d, freeze_mode="full")
 
     # TRANSFER LEARNING EXPERIMENTS
-    for mode in ["freeze", "partial", "full"]:
-        train(dropout_p=0.5, freeze_mode=mode)    
+    #for mode in ["freeze", "partial", "full"]:
+     #   train(dropout_p=0.5, freeze_mode=mode)    
