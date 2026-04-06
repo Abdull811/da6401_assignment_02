@@ -43,6 +43,15 @@ def denormalize(img):
     img = img * std + mean
     img = img.clamp(0,1)
     return img.permute(1,2,0).numpy()
+
+def colorize_mask(mask):
+    colored = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
+
+    colored[mask == 0] = [0, 0, 0]       # background
+    colored[mask == 1] = [0, 255, 0]     # pet
+    colored[mask == 2] = [255, 0, 0]     # boundary
+
+    return colored
     
 
 # Metrics
@@ -278,19 +287,27 @@ def train(dropout_p=0.5, freeze_mode="full"):
             
             # Image
             "input": wandb.Image(img_vis),
-            "gt_mask": wandb.Image(gt.numpy()),
-            "pred_mask": wandb.Image(pred.numpy()),
-            "first_layer_feature": wandb.Image(first_map.numpy()),
-            "last_layer_feature": wandb.Image(last_map.numpy()),
+            "gt_mask": wandb.Image(colorize_mask(gt.numpy())),
+            "pred_mask": wandb.Image(colorize_mask(pred.numpy())),
+            "first_layer_feature": wandb.Image(
+                ((first_map.numpy() - first_map.numpy().min()) /
+                 (first_map.numpy().max() - first_map.numpy().min() + 1e-6) * 255).astype(np.uint8)
+            ),
+            "last_layer_feature": wandb.Image(
+                ((last_map.numpy() - last_map.numpy().min()) /
+                 (last_map.numpy().max() - last_map.numpy().min() + 1e-6) * 255).astype(np.uint8)
+            ),
 
             # Feature map (FIXED)
-            "feature_map": wandb.Image(fm_vis)   
+            "feature_map": wandb.Image(
+                ((fm_vis - fm_vis.min()) / (fm_vis.max() - fm_vis.min() + 1e-6) * 255).astype(np.uint8)
+            )
         })
 
         for i in range(min(3, vis_images.shape[0])):
             wandb.log({
                 f"sample_{i}_input": wandb.Image(denormalize(vis_images[i])),
-                f"sample_{i}_gt": wandb.Image(vis_masks[i].cpu().numpy() * 100),
+                f"sample_{i}_gt": wandb.Image(colorize_mask(vis_masks[i].cpu().numpy())),
                 f"sample_{i}_pred": wandb.Image(torch.argmax(seg_out[i], dim=0).cpu().numpy() * 100)
             })
 
