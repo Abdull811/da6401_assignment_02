@@ -31,7 +31,7 @@ from losses.iou_loss import IoULoss
 # Configuration
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 8
-EPOCHS = 10
+EPOCHS = 1
 LR = 1e-4
 
 # GLOBAL NORMALIZATION FIX
@@ -378,12 +378,12 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
 # RUN
 if __name__ == "__main__":
-    #train(dropout_p=0.5, freeze_mode="full")
+    train(dropout_p=0.5, freeze_mode="full")
     
     # DROPOUT EXPERIMENTS
-    for d in [0.0, 0.2, 0.5]:
-        train(dropout_p=d, freeze_mode="full")
+    #for d in [0.0, 0.2, 0.5]:
+     #   train(dropout_p=d, freeze_mode="full")
 
     # TRANSFER LEARNING EXPERIMENTS
-    for mode in ["freeze", "partial", "full"]:
-        train(dropout_p=0.5, freeze_mode=mode)    
+    #for mode in ["freeze", "partial", "full"]:
+     #   train(dropout_p=0.5, freeze_mode=mode)    
