@@ -250,9 +250,9 @@ def train(dropout_p=0.5, freeze_mode="full"):
                 
                 x_act = classifier.encoder.conv3(x_act)
                 
-                wandb.log({
-                    "conv3_activation": wandb.Histogram(x_act.detach().cpu().numpy())
-                })
+                if batch_idx == 0:
+                   wandb.log({
+                       "conv3_activation": wandb.Histogram(x_act.detach().cpu().numpy())})
         
 
         dice_avg = dice_total / len(val_loader)
@@ -350,7 +350,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
             wandb.log({
                 f"sample_{i}_input": wandb.Image(denormalize(vis_images[i])),
                 f"sample_{i}_gt": wandb.Image(colorize_mask(vis_masks[i].cpu().numpy())),
-                f"sample_{i}_pred": wandb.Image(torch.argmax(seg_out[i], dim=0).cpu().numpy() * 100)
+                f"sample_{i}_pred": wandb.Image(colorize_mask(torch.argmax(seg_out[i], dim=0).cpu().numpy()))
             })
 
         table = wandb.Table(columns=["image", "iou"])
