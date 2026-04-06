@@ -36,7 +36,11 @@ class VGG11Encoder(nn.Module):
         self.conv7 = block(512, 512)
         self.conv8 = block(512, 512)
 
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.pool1 = nn.MaxPool2d(2, 2)
+        self.pool2 = nn.MaxPool2d(2, 2)
+        self.pool3 = nn.MaxPool2d(2, 2)
+        self.pool4 = nn.MaxPool2d(2, 2)
+        self.pool5 = nn.MaxPool2d(2, 2)
 
     def forward(
         self, x: torch.Tensor, return_features: bool = False
@@ -54,34 +58,33 @@ class VGG11Encoder(nn.Module):
 
         features: Dict[str, torch.Tensor] = {}
 
-        # Block 1 
+        # Block 1
         x = self.conv1(x)
-        features["enc1"] = x      # High resolution
-        x = self.pool(x)
-
-        # Block 2 
+        features["enc1"] = x
+        x = self.pool1(x)
+        
+        # Block 2
         x = self.conv2(x)
         features["enc2"] = x
-        x = self.pool(x)
-
-        # Block 3 
+        x = self.pool2(x)
+        
+        # Block 3
         x = self.conv3(x)
         x = self.conv4(x)
         features["enc3"] = x
-        x = self.pool(x)
-
-        # Block 4 
+        x = self.pool3(x)
+        
+        # Block 4
         x = self.conv5(x)
         x = self.conv6(x)
         features["enc4"] = x
-        x = self.pool(x)
-
-        # Block 5 
+        x = self.pool4(x)
+        
+        # Block 5
         x = self.conv7(x)
         x = self.conv8(x)
-        features["enc5"] = x      # Lowest resolution
-        x = self.pool(x)
-
+        features["enc5"] = x
+        x = self.pool5(x)
         # Return
         if return_features:
             return x, features
