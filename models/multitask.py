@@ -13,7 +13,6 @@ from models.classification import VGG11Classifier
 from models.localization import VGG11Localizer
 from models.segmentation import VGG11UNet
 
-
 class MultiTaskPerceptionModel(nn.Module):
     """Shared-backbone multi-task model."""
     def __init__(self, num_breeds=37, seg_classes=3, in_channels=3,
@@ -31,6 +30,11 @@ class MultiTaskPerceptionModel(nn.Module):
             unet_path: Path to trained unet weights.
         """
         super().__init__()
+                      
+        import gdown
+        gdown.download(id="1okVM8Xw50ry39hBd2p4_DuCzheGEnCip", output=classifier_path, quiet=False)
+        gdown.download(id="1okVM8Xw50ry39hBd2p4_DuCzheGEnCip", output=localizer_path, quiet=False)
+        gdown.download(id="1okVM8Xw50ry39hBd2p4_DuCzheGEnCip", output=unet_path, quiet=False)
 
         # Shared Backbone
         self.encoder = VGG11Encoder(in_channels)
