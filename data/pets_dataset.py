@@ -72,24 +72,16 @@ class OxfordIIITPetDataset(Dataset):
             image = image / 255.0
 
         # LOAD MASK
-        mask = mpimg.imread(mask_path)
-
-        # Convert to single channel
-        if len(mask.shape) == 3:
-            mask = mask[:, :, 0]
-
-        # Convert to uint8 safely
-        if mask.max() <= 1.0:
-            mask = (mask * 255).astype(np.uint8)
-        else:
-            mask = mask.astype(np.uint8)
-
+        mask = np.round(mask).astype(np.uint8)
+        
         mask_final = np.zeros_like(mask, dtype=np.int64)
-
+        
         mask_final[mask == 1] = 1   # pet
         mask_final[mask == 2] = 2   # boundary
         mask_final[mask == 3] = 0   # background
-
+        
+        mask_final = np.clip(mask_final, 0, 2)
+        
         mask = mask_final
 
         # APPLY TRANSFORM
