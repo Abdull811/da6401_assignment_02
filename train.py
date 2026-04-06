@@ -219,25 +219,30 @@ def train(dropout_p=0.5, freeze_mode="full"):
         vis_images = images
         vis_masks = masks
 
-        with torch.no_grad():
+       with torch.no_grad():
             x = images
         
-            # First layer
+            # Block 1
             x1 = segmenter.encoder.conv1(x)
             first_map = x1[0].mean(dim=0).detach().cpu()
         
-            # Pass through encoder properly
-            x = segmenter.encoder.pool(x1)
+            x = segmenter.encoder.pool1(x1)
+        
+            # Block 2
             x = segmenter.encoder.conv2(x)
-            x = segmenter.encoder.pool(x)
+            x = segmenter.encoder.pool2(x)
+        
+            # Block 3
             x = segmenter.encoder.conv3(x)
             x = segmenter.encoder.conv4(x)
-            x = segmenter.encoder.pool(x)
+            x = segmenter.encoder.pool3(x)
+        
+            # Block 4
             x = segmenter.encoder.conv5(x)
             x = segmenter.encoder.conv6(x)
-            x = segmenter.encoder.pool(x)
+            x = segmenter.encoder.pool4(x)
         
-            # Last conv block
+            # Block 5
             x_last = segmenter.encoder.conv7(x)
             x_last = segmenter.encoder.conv8(x_last)
         
