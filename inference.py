@@ -84,3 +84,5 @@ wandb.log({
     "final_pipeline_mask": wandb.Image(colorize_mask(pred_mask)),
     "final_pipeline_bbox": wandb.Image(img_box)
 })
+
+wandb.finish()
