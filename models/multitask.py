@@ -16,8 +16,10 @@ from models.segmentation import VGG11UNet
 
 class MultiTaskPerceptionModel(nn.Module):
     """Shared-backbone multi-task model."""
-    def __init__(self, num_breeds: int = 37, seg_classes: int = 3, in_channels: int = 3, 
-                 classifier_path: str = "classifier.pth", localizer_path: str = "localizer.pth", unet_path: str = "unet.pth"):
+    def __init__(self, num_breeds=37, seg_classes=3, in_channels=3,
+                 classifier_path="classifier.pth",
+                 localizer_path="localizer.pth",
+                 unet_path="unet.pth"):
         """
         Initialize the shared backbone/heads using these trained weights.
         Args:
@@ -31,14 +33,14 @@ class MultiTaskPerceptionModel(nn.Module):
         super().__init__()
 
         # Shared Backbone
-        #self.encoder = VGG11Encoder(in_channels)
+        self.encoder = VGG11Encoder(in_channels)
 
-        # Head
+        # Heads
         self.classifier_head = VGG11Classifier(num_breeds).classifier
         self.localizer_head = VGG11Localizer().head
         self.segmenter = VGG11UNet(seg_classes)
 
-        # Load pretrained weights
+        # Load weights
         self._load_weights(self.classifier_head, classifier_path)
         self._load_weights(self.localizer_head, localizer_path)
         self._load_weights(self.segmenter, unet_path)
