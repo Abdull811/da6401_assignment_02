@@ -31,8 +31,8 @@ from losses.iou_loss import IoULoss
 # Configuration
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 8
-EPOCHS = 1
-LR = 1e-4
+EPOCHS = 5
+LR = LR = 3e-4
 
 # GLOBAL NORMALIZATION FIX
 mean = torch.tensor([0.485, 0.456, 0.406]).view(3,1,1)
