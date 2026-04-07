@@ -115,6 +115,13 @@ def pixel_accuracy(pred, target):
 
 
 def compute_iou(box1, box2):
+    # convert normalized → pixel
+    box1 = box1.copy()
+    box2 = box2.copy()
+
+    box1 *= 224.0
+    box2 *= 224.0
+
     def convert(box):
         xc, yc, w, h = box
         return xc-w/2, yc-h/2, xc+w/2, yc+h/2
@@ -127,6 +134,7 @@ def compute_iou(box1, box2):
 
     inter = max(ix2-ix1, 0) * max(iy2-iy1, 0)
     union = (px2-px1)*(py2-py1) + (tx2-tx1)*(ty2-ty1) - inter
+
     return inter / (union + 1e-6)
 
 
@@ -175,7 +183,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
     seg_loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([0.3,1.0,1.0]).to(DEVICE))
 
     # Optimizers
-    cls_opt = optim.Adam(classifier.parameters(), lr=LR, weight_decay=1e-4)
+    cls_opt = optim.Adam(classifier.parameters(), lr=1e-4, weight_decay=1e-4)
     loc_opt = optim.Adam(localizer.parameters(), lr=LR)
     seg_opt = optim.Adam(segmenter.parameters(), lr=LR)
 
