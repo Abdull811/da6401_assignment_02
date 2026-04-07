@@ -19,7 +19,13 @@ class VGG11UNet(nn.Module):
     """U-Net style segmentation network.
     """
 
-    def __init__(self, num_classes: int = 3, in_channels: int = 3, dropout_p: float = 0.5):
+    def __init__(
+        self,
+        num_classes: int = 3,
+        in_channels: int = 3,
+        dropout_p: float = 0.5,
+        use_batchnorm: bool = True,
+    ):
         """
         Initialize the VGG11UNet model.
 
@@ -31,15 +37,15 @@ class VGG11UNet(nn.Module):
         super().__init__()
 
         # Extract high-level features from image
-        self.encoder = VGG11Encoder(in_channels=in_channels)
+        self.encoder = VGG11Encoder(in_channels=in_channels, use_batchnorm=use_batchnorm)
 
         # Decoder blocks
         def conv_block(in_c, out_c):
-            return nn.Sequential(
-                nn.Conv2d(in_c, out_c, 3, padding=1),
-                nn.BatchNorm2d(out_c),
-                nn.ReLU(inplace=True)
-            )
+            layers = [nn.Conv2d(in_c, out_c, 3, padding=1)]
+            if use_batchnorm:
+                layers.append(nn.BatchNorm2d(out_c))
+            layers.append(nn.ReLU(inplace=True))
+            return nn.Sequential(*layers)
 
         self.up1 = nn.ConvTranspose2d(512, 512, 2, 2)
         self.conv1 = conv_block(1024, 512)   # 512 + 512
