@@ -30,11 +30,18 @@ class OxfordIIITPetDataset(Dataset):
             self.split_file = os.path.join(root, "annotations", "test.txt")
 
         # TRANSFORM
-        self.transform = A.Compose([
-            A.Resize(224, 224),
-            A.Normalize(mean=(0.485, 0.456, 0.406),
-                std=(0.229, 0.224, 0.225))
-        ])
+        transforms = [A.Resize(224, 224)]
+        if split == "train":
+            transforms.extend(
+                [
+                    A.HorizontalFlip(p=0.5),
+                    A.RandomBrightnessContrast(p=0.3),
+                ]
+            )
+        transforms.append(
+            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+        )
+        self.transform = A.Compose(transforms)
 
         self.samples = []
         self.labels = {}
@@ -89,9 +96,11 @@ class OxfordIIITPetDataset(Dataset):
         # FINAL LABEL MAPPING
         mask_final = np.zeros_like(mask, dtype=np.int64)
         
-        mask_final[mask == 1] = 1   # pet
-        mask_final[mask == 2] = 2   # boundary
-        mask_final[mask == 3] = 0   # background
+        # Oxford-IIIT Pet trimaps use:
+        # 1 -> pet/foreground, 2 -> background, 3 -> boundary.
+        mask_final[mask == 1] = 1
+        mask_final[mask == 2] = 0
+        mask_final[mask == 3] = 2
         
         mask_final = np.clip(mask_final, 0, 2)
         
@@ -109,7 +118,7 @@ class OxfordIIITPetDataset(Dataset):
         label = torch.tensor(self.labels[name]).long()
         
         # BBOX
-        ys, xs = np.where(mask > 0)
+        ys, xs = np.where(mask == 1)
 
         if len(xs) == 0 or len(ys) == 0:
             bbox = torch.tensor([112,112,50,50], dtype=torch.float32)
@@ -122,12 +131,7 @@ class OxfordIIITPetDataset(Dataset):
             w = max(x2 - x1, 1)
             h = max(y2 - y1, 1)
         
-            bbox = torch.tensor([
-                cx / 224.0,
-                cy / 224.0,
-                w / 224.0,
-                h / 224.0
-            ], dtype=torch.float32)
-        
+            bbox = torch.tensor([cx, cy, w, h], dtype=torch.float32)
+
         return image, label, bbox, mask
     
