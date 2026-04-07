@@ -54,7 +54,7 @@ class VGG11UNet(nn.Module):
         self.conv4 = conv_block(192, 64)     # 64 + 128
 
         self.up5 = nn.ConvTranspose2d(64, 64, 2, 2)
-
+        self.conv5 = conv_block(128, 64)     # 64 + 64
 
         self.final = nn.Conv2d(64, num_classes, 1)
 
@@ -91,6 +91,8 @@ class VGG11UNet(nn.Module):
         x = self.conv4(x)
 
         x = self.up5(x)
+        x = torch.cat([x, feats["enc1"]], dim=1)
+        x = self.conv5(x)
 
         return self.final(x)
         
