@@ -47,15 +47,27 @@ class MultiTaskPerceptionModel(nn.Module):
         self._load_weights(self.localizer, localizer_path)
         self._load_weights(self.segmenter, unet_path)
 
+    def _resolve_checkpoint_path(self, path):
+        candidates = [
+            path,
+            os.path.join(PROJECT_ROOT, path),
+            os.path.join(PROJECT_ROOT, "checkpoints", os.path.basename(path)),
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+        return path
+
     def _load_weights(self, module, path):
+        resolved_path = self._resolve_checkpoint_path(path)
         try:
-            ckpt = torch.load(path, map_location="cpu")
+            ckpt = torch.load(resolved_path, map_location="cpu")
             if "state_dict" in ckpt:
                 module.load_state_dict(ckpt["state_dict"], strict=False)
             else:
                 module.load_state_dict(ckpt, strict=False)
-        except:
-            print(f"Warning: could not load {path}")    
+        except Exception as exc:
+            print(f"Warning: could not load {resolved_path}: {exc}")
        
     def forward(self, x: torch.Tensor):
         """Forward pass for multi-task model.
