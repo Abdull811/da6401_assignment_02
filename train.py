@@ -32,7 +32,7 @@ from losses.iou_loss import IoULoss
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 8
 EPOCHS = 5
-LR = LR = 3e-4
+LR = 3e-4
 
 # GLOBAL NORMALIZATION FIX
 mean = torch.tensor([0.485, 0.456, 0.406]).view(3,1,1)
@@ -155,7 +155,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
             p.requires_grad = False
 
     # Losses
-    cls_loss_fn = nn.CrossEntropyLoss()
+    cls_loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
     loc_loss_fn = nn.MSELoss()
     iou_loss_fn = IoULoss()
     seg_loss_fn = nn.CrossEntropyLoss()
@@ -207,7 +207,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
             # Segmentation
             seg_out = segmenter(images)
-            seg_loss = seg_loss_fn(seg_out, masks) + 2* dice_loss(seg_out, masks)
+            seg_loss = seg_loss_fn(seg_out, masks) + 3 * dice_loss(seg_out, masks)
             print("Pred classes:", torch.unique(torch.argmax(seg_out, dim=1)))
 
             seg_opt.zero_grad()
@@ -379,12 +379,12 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
 # RUN
 if __name__ == "__main__":
-    #train(dropout_p=0.5, freeze_mode="full")
+    train(dropout_p=0.5, freeze_mode="full")
     
     # DROPOUT EXPERIMENTS
-    for d in [0.0, 0.2, 0.5]:
-        train(dropout_p=d, freeze_mode="full")
+    #for d in [0.0, 0.2, 0.5]:
+     #   train(dropout_p=d, freeze_mode="full")
 
     # TRANSFER LEARNING EXPERIMENTS
-    for mode in ["freeze", "partial", "full"]:
-        train(dropout_p=0.5, freeze_mode=mode)    
+    #for mode in ["freeze", "partial", "full"]:
+     #   train(dropout_p=0.5, freeze_mode=mode)    
