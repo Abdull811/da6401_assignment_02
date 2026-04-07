@@ -351,8 +351,8 @@ def train(dropout_p=0.5, freeze_mode="full"):
             # Image
             "input": wandb.Image(img_np),
             "bbox_visualization": wandb.Image(img_pred),
-            "gt_mask": wandb.Image(colorize_mask(gt.numpy())),
-            "pred_mask": wandb.Image(colorize_mask(pred.numpy())),
+            "gt_mask": wandb.Image(colorize_mask(gt.cpu().numpy())),
+            "pred_mask": wandb.Image(colorize_mask(pred.cpu().numpy())),
             "first_layer_feature": wandb.Image(
                 ((first_map.numpy() - first_map.numpy().min()) /
                  (first_map.numpy().max() - first_map.numpy().min() + 1e-6) * 255).astype(np.uint8)
