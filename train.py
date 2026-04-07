@@ -24,19 +24,19 @@ from models.segmentation import VGG11UNet
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-IMAGE_SIZE = 224
-BATCH_SIZE = 16
-EPOCHS = 30
-LR_CLASSIFIER = 3e-4
-LR_LOCALIZER = 1e-4
-LR_SEGMENTER = 1e-4
+BATCH_SIZE = 32
+CLASSIFIER_EPOCHS = 25
+LOCALIZER_EPOCHS = 12
+SEGMENTER_EPOCHS = 12
+CLASSIFIER_LR = 3e-4
+LOCALIZER_LR = 1e-4
+SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
 SEED = 42
 
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
 STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
 
-os.environ["WANDB_API_KEY"] = "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"
 
 def set_seed(seed: int = SEED) -> None:
     np.random.seed(seed)
@@ -64,12 +64,10 @@ def draw_box(img: np.ndarray, box, color) -> np.ndarray:
     img = img.copy()
     h, w, _ = img.shape
     xc, yc, bw, bh = box
-
     x1 = max(0, min(int(xc - bw / 2), w - 1))
     y1 = max(0, min(int(yc - bh / 2), h - 1))
     x2 = max(0, min(int(xc + bw / 2), w - 1))
     y2 = max(0, min(int(yc + bh / 2), h - 1))
-
     img[y1 : y1 + 2, x1:x2] = color
     img[max(y2 - 2, 0) : y2, x1:x2] = color
     img[y1:y2, x1 : x1 + 2] = color
@@ -110,21 +108,11 @@ def compute_iou(box1, box2) -> float:
 
     px1, py1, px2, py2 = convert(box1)
     tx1, ty1, tx2, ty2 = convert(box2)
-
     ix1, iy1 = max(px1, tx1), max(py1, ty1)
     ix2, iy2 = min(px2, tx2), min(py2, ty2)
-
     inter = max(ix2 - ix1, 0.0) * max(iy2 - iy1, 0.0)
     union = max(px2 - px1, 0.0) * max(py2 - py1, 0.0) + max(tx2 - tx1, 0.0) * max(ty2 - ty1, 0.0) - inter
     return inter / (union + 1e-6)
-
-
-def save_checkpoint(model: nn.Module, path: str, epoch: int, best_metric: float) -> None:
-    payload = {"state_dict": model.state_dict(), "epoch": epoch, "best_metric": best_metric}
-    torch.save(payload, path)
-    checkpoints_dir = Path("checkpoints")
-    checkpoints_dir.mkdir(exist_ok=True)
-    torch.save(payload, checkpoints_dir / Path(path).name)
 
 
 def build_loaders() -> tuple[DataLoader, DataLoader]:
@@ -147,6 +135,176 @@ def build_loaders() -> tuple[DataLoader, DataLoader]:
     return train_loader, val_loader
 
 
+def save_checkpoint(model: nn.Module, filename: str, epoch: int, best_metric: float) -> None:
+    payload = {"state_dict": model.state_dict(), "epoch": epoch, "best_metric": best_metric}
+    torch.save(payload, filename)
+    checkpoints_dir = Path("checkpoints")
+    checkpoints_dir.mkdir(exist_ok=True)
+    torch.save(payload, checkpoints_dir / filename)
+
+
+def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: torch.Tensor) -> dict:
+    with torch.no_grad():
+        x = images
+        first_layer = classifier.encoder.conv1(x)[0].mean(dim=0).detach().cpu().numpy()
+        bottleneck = segmenter.encoder(x)[0].mean(dim=0).detach().cpu().numpy()
+
+    first_layer = ((first_layer - first_layer.min()) / (first_layer.max() - first_layer.min() + 1e-6) * 255).astype(np.uint8)
+    bottleneck = ((bottleneck - bottleneck.min()) / (bottleneck.max() - bottleneck.min() + 1e-6) * 255).astype(np.uint8)
+    return {
+        "first_layer_feature": wandb.Image(first_layer),
+        "last_layer_feature": wandb.Image(bottleneck),
+    }
+
+
+def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
+    optimizer = optim.Adam(model.parameters(), lr=CLASSIFIER_LR, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
+    best_f1 = -1.0
+
+    for epoch in range(1, CLASSIFIER_EPOCHS + 1):
+        model.train()
+        train_loss = 0.0
+
+        for step, (images, labels, _, _) in enumerate(train_loader, start=1):
+            images = images.to(DEVICE)
+            labels = labels.to(DEVICE)
+
+            optimizer.zero_grad()
+            logits = model(images)
+            loss = criterion(logits, labels)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            optimizer.step()
+
+            train_loss += loss.item()
+            if step == 1 or step % 20 == 0:
+                print(f"[CLS] Epoch {epoch:02d} Step {step:03d} | Loss {loss.item():.4f}")
+
+        model.eval()
+        pred_labels = []
+        true_labels = []
+        conv3_hist = None
+
+        with torch.no_grad():
+            for batch_idx, (images, labels, _, _) in enumerate(val_loader):
+                images = images.to(DEVICE)
+                labels = labels.to(DEVICE)
+                logits = model(images)
+                pred_labels.append(torch.argmax(logits, dim=1).cpu().numpy())
+                true_labels.append(labels.cpu().numpy())
+
+                if batch_idx == 0:
+                    act = images
+                    act = model.encoder.conv1(act)
+                    act = model.encoder.pool1(act)
+                    act = model.encoder.conv2(act)
+                    act = model.encoder.pool2(act)
+                    act = model.encoder.conv3(act)
+                    conv3_hist = wandb.Histogram(act.detach().cpu().numpy())
+
+        y_true = np.concatenate(true_labels)
+        y_pred = np.concatenate(pred_labels)
+        macro_f1 = f1_score(y_true, y_pred, average="macro")
+        scheduler.step(macro_f1)
+
+        wandb.log(
+            {
+                "cls_epoch": epoch,
+                "cls_train_loss": train_loss / max(len(train_loader), 1),
+                "val_cls_macro_f1": macro_f1,
+                "cls_lr": optimizer.param_groups[0]["lr"],
+                "conv3_activation": conv3_hist,
+            }
+        )
+        print(f"[CLS] Epoch {epoch:02d} | Macro-F1 {macro_f1:.4f}")
+
+        if macro_f1 > best_f1:
+            best_f1 = macro_f1
+            save_checkpoint(model, "classifier.pth", epoch, best_f1)
+
+    return best_f1
+
+
+def train_localizer(
+    model: VGG11Localizer,
+    classifier: VGG11Classifier,
+    encoder_state,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+) -> float:
+    model.encoder.load_state_dict(encoder_state, strict=True)
+    criterion_reg = nn.SmoothL1Loss(beta=5.0)
+    criterion_iou = IoULoss()
+    optimizer = optim.Adam(model.parameters(), lr=LOCALIZER_LR, weight_decay=1e-5)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
+    best_iou = -1.0
+
+    for epoch in range(1, LOCALIZER_EPOCHS + 1):
+        model.train()
+        train_loss = 0.0
+
+        for step, (images, _, boxes, _) in enumerate(train_loader, start=1):
+            images = images.to(DEVICE)
+            boxes = boxes.to(DEVICE)
+
+            optimizer.zero_grad()
+            pred_boxes = model(images)
+            loss = 0.5 * criterion_reg(pred_boxes, boxes) + criterion_iou(pred_boxes, boxes)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            optimizer.step()
+
+            train_loss += loss.item()
+            if step == 1 or step % 20 == 0:
+                print(f"[LOC] Epoch {epoch:02d} Step {step:03d} | Loss {loss.item():.4f}")
+
+        model.eval()
+        ious = []
+        bbox_table = None
+
+        with torch.no_grad():
+            for batch_idx, (images, _, boxes, _) in enumerate(val_loader):
+                images = images.to(DEVICE)
+                boxes = boxes.to(DEVICE)
+                pred_boxes = model(images)
+                cls_probs = torch.softmax(classifier(images), dim=1)
+                ious.extend([compute_iou(pred, target) for pred, target in zip(pred_boxes.cpu().numpy(), boxes.cpu().numpy())])
+
+                if batch_idx == 0:
+                    bbox_table = wandb.Table(columns=["image", "confidence", "iou"])
+                    limit = min(10, images.shape[0])
+                    for idx in range(limit):
+                        img_i = (denormalize(images[idx]) * 255).astype(np.uint8)
+                        pred_i = pred_boxes[idx].detach().cpu().numpy()
+                        gt_i = boxes[idx].detach().cpu().numpy()
+                        overlay = draw_box(draw_box(img_i, gt_i, [0, 255, 0]), pred_i, [255, 0, 0])
+                        confidence = float(cls_probs[idx].max().item())
+                        bbox_table.add_data(wandb.Image(overlay), confidence, compute_iou(pred_i, gt_i))
+
+        mean_iou = float(np.mean(ious)) if ious else 0.0
+        scheduler.step(mean_iou)
+        wandb.log(
+            {
+                "loc_epoch": epoch,
+                "loc_train_loss": train_loss / max(len(train_loader), 1),
+                "val_loc_iou": mean_iou,
+                "val_loc_acc@0.5": float(np.mean(np.array(ious) >= 0.5)) if ious else 0.0,
+                "val_loc_acc@0.75": float(np.mean(np.array(ious) >= 0.75)) if ious else 0.0,
+                "loc_lr": optimizer.param_groups[0]["lr"],
+                "IoU_table": bbox_table,
+            }
+        )
+        print(f"[LOC] Epoch {epoch:02d} | Mean-IoU {mean_iou:.4f}")
+
+        if mean_iou > best_iou:
+            best_iou = mean_iou
+            save_checkpoint(model, "localizer.pth", epoch, best_iou)
+
+    return best_iou
+
+
 def set_segmentation_freeze_mode(segmenter: VGG11UNet, freeze_mode: str) -> None:
     if freeze_mode == "freeze":
         for param in segmenter.encoder.parameters():
@@ -157,244 +315,140 @@ def set_segmentation_freeze_mode(segmenter: VGG11UNet, freeze_mode: str) -> None
             param.requires_grad = False
 
 
-def train(dropout_p: float = 0.5, freeze_mode: str = "full", wandb_mode: str = "online") -> None:
-    set_seed()
+def train_segmenter(
+    classifier: VGG11Classifier,
+    model: VGG11UNet,
+    encoder_state,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    freeze_mode: str,
+) -> float:
+    model.encoder.load_state_dict(encoder_state, strict=True)
+    set_segmentation_freeze_mode(model, freeze_mode)
+    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([0.1, 1.0, 2.0], device=DEVICE))
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=SEGMENTER_LR, weight_decay=1e-5)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
+    best_dice = -1.0
 
-    run = wandb.init(
+    for epoch in range(1, SEGMENTER_EPOCHS + 1):
+        model.train()
+        train_loss = 0.0
+
+        for step, (images, _, _, masks) in enumerate(train_loader, start=1):
+            images = images.to(DEVICE)
+            masks = masks.to(DEVICE)
+
+            optimizer.zero_grad()
+            logits = model(images)
+            loss = criterion_ce(logits, masks) + dice_loss(logits, masks)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            optimizer.step()
+
+            train_loss += loss.item()
+            if step == 1 or step % 20 == 0:
+                print(f"[SEG] Epoch {epoch:02d} Step {step:03d} | Loss {loss.item():.4f}")
+
+        model.eval()
+        dice_values = []
+        pixel_values = []
+        visual_log = {}
+
+        with torch.no_grad():
+            for batch_idx, (images, _, boxes, masks) in enumerate(val_loader):
+                images = images.to(DEVICE)
+                boxes = boxes.to(DEVICE)
+                masks = masks.to(DEVICE)
+                logits = model(images)
+                dice_values.append(float(dice_score(logits, masks).item()))
+                pixel_values.append(float(pixel_accuracy(logits, masks).item()))
+
+                if batch_idx == 0:
+                    pred_masks = torch.argmax(logits, dim=1)
+                    sample_img = (denormalize(images[0]) * 255).astype(np.uint8)
+                    visual_log = {
+                        "bbox_visualization": wandb.Image(draw_box(sample_img, boxes[0].detach().cpu().numpy(), [0, 255, 0])),
+                        "gt_mask": wandb.Image(colorize_mask(masks[0].detach().cpu().numpy())),
+                        "pred_mask": wandb.Image(colorize_mask(pred_masks[0].detach().cpu().numpy())),
+                    }
+                    visual_log.update(log_feature_maps(classifier, model, images))
+                    for idx in range(min(5, images.shape[0])):
+                        visual_log[f"seg_sample_{idx}_input"] = wandb.Image((denormalize(images[idx]) * 255).astype(np.uint8))
+                        visual_log[f"seg_sample_{idx}_gt"] = wandb.Image(colorize_mask(masks[idx].detach().cpu().numpy()))
+                        visual_log[f"seg_sample_{idx}_pred"] = wandb.Image(colorize_mask(pred_masks[idx].detach().cpu().numpy()))
+
+        mean_dice = float(np.mean(dice_values)) if dice_values else 0.0
+        mean_pixel_acc = float(np.mean(pixel_values)) if pixel_values else 0.0
+        scheduler.step(mean_dice)
+        wandb.log(
+            {
+                "seg_epoch": epoch,
+                "seg_train_loss": train_loss / max(len(train_loader), 1),
+                "val_dice": mean_dice,
+                "val_pixel_acc": mean_pixel_acc,
+                "seg_lr": optimizer.param_groups[0]["lr"],
+                **visual_log,
+            }
+        )
+        print(f"[SEG] Epoch {epoch:02d} | Dice {mean_dice:.4f} | PixelAcc {mean_pixel_acc:.4f}")
+
+        if mean_dice > best_dice:
+            best_dice = mean_dice
+            save_checkpoint(model, "unet.pth", epoch, best_dice)
+
+    return best_dice
+
+
+def train(
+    dropout_p: float = 0.2,
+    freeze_mode: str = "full",
+    wandb_mode: str = "online",
+    use_batchnorm: bool = True,
+) -> None:
+    set_seed()
+    wandb.init(
         project="da6401_assignment_02",
         name=f"dropout_{dropout_p}_{freeze_mode}",
         config={
             "dropout": dropout_p,
             "freeze_mode": freeze_mode,
+            "use_batchnorm": use_batchnorm,
             "batch_size": BATCH_SIZE,
-            "epochs": EPOCHS,
-            "lr_classifier": LR_CLASSIFIER,
-            "lr_localizer": LR_LOCALIZER,
-            "lr_segmenter": LR_SEGMENTER,
+            "classifier_epochs": CLASSIFIER_EPOCHS,
+            "localizer_epochs": LOCALIZER_EPOCHS,
+            "segmenter_epochs": SEGMENTER_EPOCHS,
         },
         mode=wandb_mode,
     )
 
     train_loader, val_loader = build_loaders()
 
-    classifier = VGG11Classifier(dropout_p=dropout_p).to(DEVICE)
-    localizer = VGG11Localizer(dropout_p=dropout_p).to(DEVICE)
-    segmenter = VGG11UNet(dropout_p=dropout_p).to(DEVICE)
-    set_segmentation_freeze_mode(segmenter, freeze_mode)
+    classifier = VGG11Classifier(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
+    best_cls_f1 = train_classifier(classifier, train_loader, val_loader)
+    encoder_state = classifier.encoder.state_dict()
 
-    cls_loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
-    loc_reg_loss = nn.SmoothL1Loss(beta=5.0)
-    loc_iou_loss = IoULoss()
-    seg_ce_loss = nn.CrossEntropyLoss(weight=torch.tensor([0.2, 1.0, 1.5], device=DEVICE))
+    localizer = VGG11Localizer(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
+    best_loc_iou = train_localizer(localizer, classifier, encoder_state, train_loader, val_loader)
 
-    cls_opt = optim.Adam(classifier.parameters(), lr=LR_CLASSIFIER, weight_decay=1e-4)
-    loc_opt = optim.Adam(localizer.parameters(), lr=LR_LOCALIZER, weight_decay=1e-5)
-    seg_opt = optim.Adam(filter(lambda p: p.requires_grad, segmenter.parameters()), lr=LR_SEGMENTER, weight_decay=1e-5)
+    segmenter = VGG11UNet(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
+    best_seg_dice = train_segmenter(classifier, segmenter, encoder_state, train_loader, val_loader, freeze_mode)
 
-    cls_sched = optim.lr_scheduler.ReduceLROnPlateau(cls_opt, mode="max", factor=0.5, patience=2)
-    loc_sched = optim.lr_scheduler.ReduceLROnPlateau(loc_opt, mode="max", factor=0.5, patience=2)
-    seg_sched = optim.lr_scheduler.ReduceLROnPlateau(seg_opt, mode="max", factor=0.5, patience=2)
-
-    best_cls_f1 = -1.0
-    best_loc_iou = -1.0
-    best_seg_dice = -1.0
-
-    for epoch in range(1, EPOCHS + 1):
-        classifier.train()
-        localizer.train()
-        segmenter.train()
-
-        train_cls_loss = 0.0
-        train_loc_loss = 0.0
-        train_seg_loss = 0.0
-
-        for step, (images, labels, bboxes, masks) in enumerate(train_loader, start=1):
-            images = images.to(DEVICE)
-            labels = labels.to(DEVICE)
-            bboxes = bboxes.to(DEVICE)
-            masks = masks.to(DEVICE)
-
-            cls_opt.zero_grad()
-            cls_logits = classifier(images)
-            cls_loss = cls_loss_fn(cls_logits, labels)
-            cls_loss.backward()
-            torch.nn.utils.clip_grad_norm_(classifier.parameters(), 5.0)
-            cls_opt.step()
-
-            loc_opt.zero_grad()
-            pred_boxes = localizer(images)
-            loc_loss = 0.5 * loc_reg_loss(pred_boxes, bboxes) + 1.0 * loc_iou_loss(pred_boxes, bboxes)
-            loc_loss.backward()
-            torch.nn.utils.clip_grad_norm_(localizer.parameters(), 5.0)
-            loc_opt.step()
-
-            seg_opt.zero_grad()
-            seg_logits = segmenter(images)
-            seg_loss = seg_ce_loss(seg_logits, masks) + 1.0 * dice_loss(seg_logits, masks)
-            seg_loss.backward()
-            torch.nn.utils.clip_grad_norm_(segmenter.parameters(), 5.0)
-            seg_opt.step()
-
-            train_cls_loss += cls_loss.item()
-            train_loc_loss += loc_loss.item()
-            train_seg_loss += seg_loss.item()
-
-            if step == 1 or step % 20 == 0:
-                print(
-                    f"Epoch {epoch:02d} Step {step:03d} | "
-                    f"CLS {cls_loss.item():.4f} | LOC {loc_loss.item():.4f} | SEG {seg_loss.item():.4f}"
-                )
-
-        classifier.eval()
-        localizer.eval()
-        segmenter.eval()
-
-        val_cls_logits = []
-        val_labels = []
-        val_box_ious = []
-        val_dice_total = 0.0
-        val_pixel_total = 0.0
-        vis_batch = None
-
-        with torch.no_grad():
-            for batch_idx, (images, labels, bboxes, masks) in enumerate(val_loader):
-                images = images.to(DEVICE)
-                labels = labels.to(DEVICE)
-                bboxes = bboxes.to(DEVICE)
-                masks = masks.to(DEVICE)
-
-                cls_logits = classifier(images)
-                pred_boxes = localizer(images)
-                seg_logits = segmenter(images)
-
-                val_cls_logits.append(torch.argmax(cls_logits, dim=1).cpu().numpy())
-                val_labels.append(labels.cpu().numpy())
-                val_box_ious.extend(
-                    [compute_iou(pred, target) for pred, target in zip(pred_boxes.cpu().numpy(), bboxes.cpu().numpy())]
-                )
-                val_dice_total += float(dice_score(seg_logits, masks).item())
-                val_pixel_total += float(pixel_accuracy(seg_logits, masks).item())
-
-                if batch_idx == 0:
-                    vis_batch = (images, labels, bboxes, masks, cls_logits, pred_boxes, seg_logits)
-
-                    act = images
-                    act = classifier.encoder.conv1(act)
-                    act = classifier.encoder.pool1(act)
-                    act = classifier.encoder.conv2(act)
-                    act = classifier.encoder.pool2(act)
-                    act = classifier.encoder.conv3(act)
-                    wandb.log({"conv3_activation": wandb.Histogram(act.detach().cpu().numpy())}, commit=False)
-
-        val_preds = np.concatenate(val_cls_logits)
-        val_targets = np.concatenate(val_labels)
-        cls_macro_f1 = f1_score(val_targets, val_preds, average="macro")
-        loc_iou_avg = float(np.mean(val_box_ious)) if val_box_ious else 0.0
-        loc_acc_05 = float(np.mean(np.array(val_box_ious) >= 0.5)) if val_box_ious else 0.0
-        loc_acc_075 = float(np.mean(np.array(val_box_ious) >= 0.75)) if val_box_ious else 0.0
-        seg_dice_avg = val_dice_total / max(len(val_loader), 1)
-        seg_pixel_avg = val_pixel_total / max(len(val_loader), 1)
-
-        cls_sched.step(cls_macro_f1)
-        loc_sched.step(loc_iou_avg)
-        seg_sched.step(seg_dice_avg)
-
-        log_payload = {
-            "epoch": epoch,
-            "train_cls_loss": train_cls_loss / max(len(train_loader), 1),
-            "train_loc_loss": train_loc_loss / max(len(train_loader), 1),
-            "train_seg_loss": train_seg_loss / max(len(train_loader), 1),
-            "val_cls_macro_f1": cls_macro_f1,
-            "val_loc_iou": loc_iou_avg,
-            "val_loc_acc@0.5": loc_acc_05,
-            "val_loc_acc@0.75": loc_acc_075,
-            "val_dice": seg_dice_avg,
-            "val_pixel_acc": seg_pixel_avg,
-            "lr_classifier": cls_opt.param_groups[0]["lr"],
-            "lr_localizer": loc_opt.param_groups[0]["lr"],
-            "lr_segmenter": seg_opt.param_groups[0]["lr"],
-        }
-
-        if vis_batch is not None:
-            images, labels, bboxes, masks, cls_logits, pred_boxes, seg_logits = vis_batch
-            sample_img = (denormalize(images[0]) * 255).astype(np.uint8)
-            gt_box = bboxes[0].detach().cpu().numpy()
-            pred_box = pred_boxes[0].detach().cpu().numpy()
-            sample_with_boxes = draw_box(draw_box(sample_img, gt_box, [0, 255, 0]), pred_box, [255, 0, 0])
-            gt_mask = masks[0].detach().cpu().numpy()
-            pred_mask = torch.argmax(seg_logits[0], dim=0).detach().cpu().numpy()
-
-            first_map = segmenter.encoder.conv1(images)[0].mean(dim=0).detach().cpu().numpy()
-            bottleneck = segmenter.encoder(images)[0].mean(dim=0).detach().cpu().numpy()
-            first_map = ((first_map - first_map.min()) / (first_map.max() - first_map.min() + 1e-6) * 255).astype(np.uint8)
-            bottleneck = ((bottleneck - bottleneck.min()) / (bottleneck.max() - bottleneck.min() + 1e-6) * 255).astype(np.uint8)
-
-            log_payload.update(
-                {
-                    "bbox_visualization": wandb.Image(sample_with_boxes),
-                    "gt_mask": wandb.Image(colorize_mask(gt_mask)),
-                    "pred_mask": wandb.Image(colorize_mask(pred_mask)),
-                    "first_layer_feature": wandb.Image(first_map),
-                    "last_layer_feature": wandb.Image(bottleneck),
-                }
-            )
-
-            bbox_table = wandb.Table(columns=["image", "iou"])
-            limit = min(10, images.shape[0])
-            for idx in range(limit):
-                img_i = (denormalize(images[idx]) * 255).astype(np.uint8)
-                pred_i = pred_boxes[idx].detach().cpu().numpy()
-                gt_i = bboxes[idx].detach().cpu().numpy()
-                overlay = draw_box(draw_box(img_i, gt_i, [0, 255, 0]), pred_i, [255, 0, 0])
-                bbox_table.add_data(wandb.Image(overlay), compute_iou(pred_i, gt_i))
-            log_payload["IoU_table"] = bbox_table
-
-        wandb.log(log_payload)
-
-        print(
-            f"Epoch {epoch:02d} | "
-            f"F1 {cls_macro_f1:.4f} | IoU {loc_iou_avg:.4f} | "
-            f"Acc@0.5 {loc_acc_05:.4f} | Dice {seg_dice_avg:.4f}"
-        )
-
-        if cls_macro_f1 > best_cls_f1:
-            best_cls_f1 = cls_macro_f1
-            save_checkpoint(classifier, "classifier.pth", epoch, best_cls_f1)
-
-        if loc_iou_avg > best_loc_iou:
-            best_loc_iou = loc_iou_avg
-            save_checkpoint(localizer, "localizer.pth", epoch, best_loc_iou)
-
-        if seg_dice_avg > best_seg_dice:
-            best_seg_dice = seg_dice_avg
-            save_checkpoint(segmenter, "unet.pth", epoch, best_seg_dice)
-
-    if best_cls_f1 < 0:
-        save_checkpoint(classifier, "classifier.pth", EPOCHS, 0.0)
-    if best_loc_iou < 0:
-        save_checkpoint(localizer, "localizer.pth", EPOCHS, 0.0)
-    if best_seg_dice < 0:
-        save_checkpoint(segmenter, "unet.pth", EPOCHS, 0.0)
-
-    if run is not None:
-        wandb.finish()
+    wandb.summary["best_cls_macro_f1"] = best_cls_f1
+    wandb.summary["best_loc_iou"] = best_loc_iou
+    wandb.summary["best_seg_dice"] = best_seg_dice
+    wandb.finish()
 
 
 def run_report_experiments(wandb_mode: str = "online") -> None:
+    for use_batchnorm in [False, True]:
+        train(dropout_p=0.2, freeze_mode="full", wandb_mode=wandb_mode, use_batchnorm=use_batchnorm)
+
     for dropout_p in [0.0, 0.2, 0.5]:
-        train(dropout_p=dropout_p, freeze_mode="full", wandb_mode=wandb_mode)
+        train(dropout_p=dropout_p, freeze_mode="full", wandb_mode=wandb_mode, use_batchnorm=True)
 
     for freeze_mode in ["freeze", "partial", "full"]:
-        train(dropout_p=0.2, freeze_mode=freeze_mode, wandb_mode=wandb_mode)
+        train(dropout_p=0.2, freeze_mode=freeze_mode, wandb_mode=wandb_mode, use_batchnorm=True)
 
 
 if __name__ == "__main__":
     train(dropout_p=0.2, freeze_mode="full", wandb_mode="online")
-    
-    # DROPOUT EXPERIMENTS
-    #for d in [0.0, 0.2, 0.5]:
-     #   train(dropout_p=d, freeze_mode="full")
-
-    # TRANSFER LEARNING EXPERIMENTS
-  #for mode in ["freeze", "partial", "full"]:
-   #     train(dropout_p=0.5, freeze_mode=mode)    
