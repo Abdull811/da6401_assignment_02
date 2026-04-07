@@ -22,7 +22,6 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from data.pets_dataset import OxfordIIITPetDataset
-from models.vgg11 import VGG11Encoder
 from models.classification import VGG11Classifier
 from models.localization import VGG11Localizer
 from models.segmentation import VGG11UNet
@@ -33,7 +32,7 @@ from losses.iou_loss import IoULoss
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 8
 EPOCHS = 20
-LR = 3e-4
+LR = 1e-4
 
 # GLOBAL NORMALIZATION FIX
 mean = torch.tensor([0.485, 0.456, 0.406]).view(3,1,1)
@@ -154,16 +153,9 @@ def train(dropout_p=0.5, freeze_mode="full"):
     )
 
     # Models
-    encoder = VGG11Encoder().to(DEVICE)
-
-    classifier = VGG11Classifier().to(DEVICE)
-    localizer = VGG11Localizer().to(DEVICE)
-    segmenter = VGG11UNet().to(DEVICE)
-    
-    # SHARE ENCODER
-    classifier.encoder = encoder
-    localizer.encoder = encoder
-    segmenter.encoder = encoder
+    classifier = VGG11Classifier(dropout_p=dropout_p).to(DEVICE)
+    localizer = VGG11Localizer(dropout_p=dropout_p).to(DEVICE)
+    segmenter = VGG11UNet(dropout_p=dropout_p).to(DEVICE)
 
     # Transfer Learning control
     # Freeze modes
@@ -180,7 +172,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
     cls_loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
     loc_loss_fn = nn.MSELoss()
     iou_loss_fn = IoULoss()
-    seg_loss_fn = nn.CrossEntropyLoss()
+    seg_loss_fn = nn.CrossEntropyLoss(weight=torch.tensor([0.3,1.0,1.0]).to(DEVICE))
 
     # Optimizers
     cls_opt = optim.Adam(classifier.parameters(), lr=LR)
