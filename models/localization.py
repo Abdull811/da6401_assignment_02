@@ -60,8 +60,8 @@ class VGG11Localizer(nn.Module):
         raw_box = self.head(x)
 
         # Normalize outputs
-        centers = torch.sigmoid(raw_box[:, :2]) * self.image_size
-        sizes = torch.sigmoid(raw_box[:, 2:]) * self.image_size
+        centers = torch.sigmoid(raw_box[:, :2])
+        sizes = torch.sigmoid(raw_box[:, 2:])
 
         # Avoid zero-size boxes
         sizes = torch.clamp(sizes, min=1.0)
