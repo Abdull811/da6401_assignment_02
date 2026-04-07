@@ -123,7 +123,7 @@ class OxfordIIITPetDataset(Dataset):
         
         mask = mask_final
 
-        ys_raw, xs_raw = np.where(mask == 1)
+        ys_raw, xs_raw = np.where(mask > 0)
         if len(xs_raw) == 0 or len(ys_raw) == 0:
             x1_raw, y1_raw, x2_raw, y2_raw = 0, 0, image.shape[1] - 1, image.shape[0] - 1
         else:
