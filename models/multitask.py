@@ -39,13 +39,13 @@ class MultiTaskPerceptionModel(nn.Module):
         self.encoder = VGG11Encoder(in_channels)
 
         # Heads
-        self.classifier_head = VGG11Classifier(num_breeds).classifier
+        self.classifier = VGG11Classifier(num_breeds)
         self.localizer = VGG11Localizer()
         self.segmenter = VGG11UNet(seg_classes)
 
         # Load weights
-        self._load_weights(self.classifier_head, classifier_path)
-        self._load_weights(self.localizer_head, localizer_path)
+        self._load_weights(self.classifier, classifier_path)
+        self._load_weights(self.localizer, localizer_path)
         self._load_weights(self.segmenter, unet_path)
 
     def _load_weights(self, module, path):
@@ -73,10 +73,10 @@ class MultiTaskPerceptionModel(nn.Module):
         features = self.encoder(x)
 
         # Classification
-        cls_out = self.classifier_head(features)
+        cls_out = self.classifier(features)
 
         # Localization
-        loc_out = self.localizer_head(x)
+        loc_out = self.localizer(x)
 
         # Segmentation
         seg_out = self.segmenter(x)
