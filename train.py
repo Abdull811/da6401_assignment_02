@@ -117,9 +117,9 @@ def compute_iou(box1, box2) -> float:
     return inter / (union + 1e-6)
 
 
-def build_loaders() -> tuple[DataLoader, DataLoader]:
-    train_ds = OxfordIIITPetDataset("data", "train")
-    val_ds = OxfordIIITPetDataset("data", "val")
+def build_loaders(crop_for_classification: bool = False) -> tuple[DataLoader, DataLoader]:
+    train_ds = OxfordIIITPetDataset("data", "train", crop_for_classification=crop_for_classification)
+    val_ds = OxfordIIITPetDataset("data", "val", crop_for_classification=crop_for_classification)
     train_loader = DataLoader(
         train_ds,
         batch_size=BATCH_SIZE,
@@ -435,17 +435,18 @@ def train(
         mode=wandb_mode,
     )
 
-    train_loader, val_loader = build_loaders()
+    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=True)
+    task_train_loader, task_val_loader = build_loaders(crop_for_classification=False)
 
     classifier = VGG11Classifier(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
-    best_cls_f1 = train_classifier(classifier, train_loader, val_loader)
+    best_cls_f1 = train_classifier(classifier, cls_train_loader, cls_val_loader)
     encoder_state = classifier.encoder.state_dict()
 
     localizer = VGG11Localizer(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
-    best_loc_iou = train_localizer(localizer, classifier, encoder_state, train_loader, val_loader)
+    best_loc_iou = train_localizer(localizer, classifier, encoder_state, task_train_loader, task_val_loader)
 
     segmenter = VGG11UNet(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
-    best_seg_dice = train_segmenter(classifier, segmenter, encoder_state, train_loader, val_loader, freeze_mode)
+    best_seg_dice = train_segmenter(classifier, segmenter, encoder_state, task_train_loader, task_val_loader, freeze_mode)
 
     wandb.summary["best_cls_macro_f1"] = best_cls_f1
     wandb.summary["best_loc_iou"] = best_loc_iou
