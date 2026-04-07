@@ -58,8 +58,6 @@ def draw_box(img, box, color):
 
     H, W, _ = img.shape
 
-    xc, yc, w, h = box
-
     # Convert normalized → pixel
     xc *= W
     yc *= H
@@ -115,13 +113,6 @@ def pixel_accuracy(pred, target):
 
 
 def compute_iou(box1, box2):
-    # convert normalized → pixel
-    box1 = box1.copy()
-    box2 = box2.copy()
-
-    box1 *= 224.0
-    box2 *= 224.0
-
     def convert(box):
         xc, yc, w, h = box
         return xc-w/2, yc-h/2, xc+w/2, yc+h/2
