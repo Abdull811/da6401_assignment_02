@@ -30,7 +30,7 @@ BATCH_SIZE = 32
 CLASSIFIER_EPOCHS = 20
 LOCALIZER_EPOCHS = 10
 SEGMENTER_EPOCHS = 10
-CLASSIFIER_LR = 1e-4
+CLASSIFIER_LR = 1e-3
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -174,10 +174,12 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(
+    optimizer = optim.SGD(
         model.parameters(),
         lr=CLASSIFIER_LR,
-        weight_decay=5e-4
+        momentum=0.9,
+        weight_decay=5e-4,
+        nesterov=True,
     )
     scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
@@ -459,10 +461,13 @@ def train(
         mode=wandb_mode,
     )
 
-    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=True)
+    # Classification was collapsing with crop-only training. Use full normalized images
+    # so train/val/inference distributions stay aligned.
+    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=False)
     task_train_loader, task_val_loader = build_loaders(crop_for_classification=False)
 
-    classifier = VGG11Classifier(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
+    # Keep the classifier simpler and more stable; BN was hurting validation generalization.
+    classifier = VGG11Classifier(dropout_p=max(dropout_p, 0.3), use_batchnorm=False).to(DEVICE)
     best_cls_f1 = train_classifier(classifier, cls_train_loader, cls_val_loader)
     load_checkpoint_into_model(classifier, "classifier.pth")
     encoder_state = classifier.encoder.state_dict()
@@ -492,4 +497,4 @@ def run_report_experiments(wandb_mode: str = "online") -> None:
 
 
 if __name__ == "__main__":
-    train(dropout_p=0.1, freeze_mode="full", wandb_mode="online")
+    train(dropout_p=0.2, freeze_mode="full", wandb_mode="online")
