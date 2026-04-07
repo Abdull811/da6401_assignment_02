@@ -26,11 +26,11 @@ from models.segmentation import VGG11UNet
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-BATCH_SIZE = 16
-CLASSIFIER_EPOCHS = 80
+BATCH_SIZE = 32
+CLASSIFIER_EPOCHS = 50
 LOCALIZER_EPOCHS = 12
 SEGMENTER_EPOCHS = 12
-CLASSIFIER_LR = 3e-4
+CLASSIFIER_LR = 1e-2
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -173,16 +173,18 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
-    optimizer = optim.AdamW(model.parameters(), lr=CLASSIFIER_LR, weight_decay=5e-5)
-    scheduler = optim.lr_scheduler.OneCycleLR(
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(
+        model.parameters(),
+        lr=CLASSIFIER_LR,
+        momentum=0.9,
+        weight_decay=5e-4,
+        nesterov=True,
+    )
+    scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
-        max_lr=CLASSIFIER_LR,
-        epochs=CLASSIFIER_EPOCHS,
-        steps_per_epoch=max(len(train_loader), 1),
-        pct_start=0.15,
-        div_factor=10.0,
-        final_div_factor=100.0,
+        milestones=[20, 35, 45],
+        gamma=0.1,
     )
     best_f1 = -1.0
 
@@ -202,7 +204,6 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
-            scheduler.step()
 
             train_loss += loss.item()
             train_correct += (torch.argmax(logits, dim=1) == labels).sum().item()
@@ -241,6 +242,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
         macro_f1 = f1_score(y_true, y_pred, average="macro")
         train_acc = train_correct / max(train_total, 1)
         val_acc = val_correct / max(val_total, 1)
+        scheduler.step()
 
         wandb.log(
             {
