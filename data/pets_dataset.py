@@ -16,9 +16,11 @@ class OxfordIIITPetDataset(Dataset):
     - segmentation (trimap)
     """
 
-    def __init__(self, root, split="train"):
+    def __init__(self, root, split="train", crop_for_classification: bool = False, crop_margin: float = 0.15):
         self.root = root
         self.split = split
+        self.crop_for_classification = crop_for_classification
+        self.crop_margin = crop_margin
 
         # PATHS
         self.images_dir = os.path.join(root, "images")
@@ -105,6 +107,23 @@ class OxfordIIITPetDataset(Dataset):
         mask_final = np.clip(mask_final, 0, 2)
         
         mask = mask_final
+
+        ys_raw, xs_raw = np.where(mask == 1)
+        if len(xs_raw) == 0 or len(ys_raw) == 0:
+            x1_raw, y1_raw, x2_raw, y2_raw = 0, 0, image.shape[1] - 1, image.shape[0] - 1
+        else:
+            x1_raw, x2_raw = xs_raw.min(), xs_raw.max()
+            y1_raw, y2_raw = ys_raw.min(), ys_raw.max()
+
+        if self.crop_for_classification:
+            pad_x = int((x2_raw - x1_raw + 1) * self.crop_margin)
+            pad_y = int((y2_raw - y1_raw + 1) * self.crop_margin)
+            x1_crop = max(0, x1_raw - pad_x)
+            x2_crop = min(image.shape[1] - 1, x2_raw + pad_x)
+            y1_crop = max(0, y1_raw - pad_y)
+            y2_crop = min(image.shape[0] - 1, y2_raw + pad_y)
+            image = image[y1_crop : y2_crop + 1, x1_crop : x2_crop + 1]
+            mask = mask[y1_crop : y2_crop + 1, x1_crop : x2_crop + 1]
 
         # APPLY TRANSFORM
         augmented = self.transform(image=image, mask=mask)
