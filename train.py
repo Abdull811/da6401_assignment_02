@@ -16,9 +16,6 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-os.environ["WANDB_API_KEY"] = "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"
-
-
 from data.pets_dataset import OxfordIIITPetDataset
 from losses.iou_loss import IoULoss
 from models.classification import VGG11Classifier
@@ -28,10 +25,10 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 25
+CLASSIFIER_EPOCHS = 40
 LOCALIZER_EPOCHS = 12
 SEGMENTER_EPOCHS = 12
-CLASSIFIER_LR = 3e-4
+CLASSIFIER_LR = 1e-3
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -161,14 +158,16 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
-    optimizer = optim.Adam(model.parameters(), lr=CLASSIFIER_LR, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.AdamW(model.parameters(), lr=CLASSIFIER_LR, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CLASSIFIER_EPOCHS)
     best_f1 = -1.0
 
     for epoch in range(1, CLASSIFIER_EPOCHS + 1):
         model.train()
         train_loss = 0.0
+        train_correct = 0
+        train_total = 0
 
         for step, (images, labels, _, _) in enumerate(train_loader, start=1):
             images = images.to(DEVICE)
@@ -182,6 +181,8 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
             optimizer.step()
 
             train_loss += loss.item()
+            train_correct += (torch.argmax(logits, dim=1) == labels).sum().item()
+            train_total += labels.numel()
             if step == 1 or step % 20 == 0:
                 print(f"[CLS] Epoch {epoch:02d} Step {step:03d} | Loss {loss.item():.4f}")
 
@@ -189,6 +190,8 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
         pred_labels = []
         true_labels = []
         conv3_hist = None
+        val_correct = 0
+        val_total = 0
 
         with torch.no_grad():
             for batch_idx, (images, labels, _, _) in enumerate(val_loader):
@@ -197,6 +200,8 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
                 logits = model(images)
                 pred_labels.append(torch.argmax(logits, dim=1).cpu().numpy())
                 true_labels.append(labels.cpu().numpy())
+                val_correct += (torch.argmax(logits, dim=1) == labels).sum().item()
+                val_total += labels.numel()
 
                 if batch_idx == 0:
                     act = images
@@ -210,18 +215,22 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
         y_true = np.concatenate(true_labels)
         y_pred = np.concatenate(pred_labels)
         macro_f1 = f1_score(y_true, y_pred, average="macro")
-        scheduler.step(macro_f1)
+        scheduler.step()
+        train_acc = train_correct / max(train_total, 1)
+        val_acc = val_correct / max(val_total, 1)
 
         wandb.log(
             {
                 "cls_epoch": epoch,
                 "cls_train_loss": train_loss / max(len(train_loader), 1),
+                "cls_train_acc": train_acc,
                 "val_cls_macro_f1": macro_f1,
+                "val_cls_acc": val_acc,
                 "cls_lr": optimizer.param_groups[0]["lr"],
                 "conv3_activation": conv3_hist,
             }
         )
-        print(f"[CLS] Epoch {epoch:02d} | Macro-F1 {macro_f1:.4f}")
+        print(f"[CLS] Epoch {epoch:02d} | TrainAcc {train_acc:.4f} | ValAcc {val_acc:.4f} | Macro-F1 {macro_f1:.4f}")
 
         if macro_f1 > best_f1:
             best_f1 = macro_f1
