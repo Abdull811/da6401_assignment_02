@@ -109,7 +109,20 @@ class OxfordIIITPetDataset(Dataset):
         label = torch.tensor(self.labels[name]).long()
         
         # BBOX
-        bbox = torch.tensor([112, 112, 224, 224], dtype=torch.float32)
+        ys, xs = np.where(mask > 0)
+
+        if len(xs) == 0 or len(ys) == 0:
+            bbox = torch.tensor([112,112,50,50], dtype=torch.float32)
+        else:
+            x1, x2 = xs.min(), xs.max()
+            y1, y2 = ys.min(), ys.max()
+        
+            cx = (x1 + x2) / 2
+            cy = (y1 + y2) / 2
+            w = x2 - x1
+            h = y2 - y1
+        
+            bbox = torch.tensor([cx, cy, w, h], dtype=torch.float32)
         
         return image, label, bbox, mask
     
