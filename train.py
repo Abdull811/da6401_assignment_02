@@ -30,7 +30,7 @@ BATCH_SIZE = 32
 CLASSIFIER_EPOCHS = 20
 LOCALIZER_EPOCHS = 10
 SEGMENTER_EPOCHS = 10
-CLASSIFIER_LR = 1e-3
+CLASSIFIER_LR = 1e-4
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -174,12 +174,10 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(
+    optimizer = optim.Adam(
         model.parameters(),
         lr=CLASSIFIER_LR,
-        momentum=0.9,
-        weight_decay=5e-4,
-        nesterov=True,
+        weight_decay=5e-4
     )
     scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
