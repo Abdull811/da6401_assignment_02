@@ -70,15 +70,17 @@ class MultiTaskPerceptionModel(nn.Module):
         except Exception as exc:
             print(f"Warning: could not load {resolved_path}: {exc}")
 
-    def _crop_from_boxes(self, x: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
+    def _crop_from_boxes(self, x: torch.Tensor, boxes: torch.Tensor, margin: float = 0.25) -> torch.Tensor:
         crops = []
         _, _, h, w = x.shape
         for image, box in zip(x, boxes):
             xc, yc, bw, bh = box
-            x1 = int(torch.clamp(xc - bw / 2, 0, w - 1).item())
-            y1 = int(torch.clamp(yc - bh / 2, 0, h - 1).item())
-            x2 = int(torch.clamp(xc + bw / 2, x1 + 1, w).item())
-            y2 = int(torch.clamp(yc + bh / 2, y1 + 1, h).item())
+            side = max(float(bw), float(bh)) * (1.0 + margin)
+            side = max(side, 8.0)
+            x1 = int(torch.clamp(xc - side / 2, 0, w - 1).item())
+            y1 = int(torch.clamp(yc - side / 2, 0, h - 1).item())
+            x2 = int(torch.clamp(xc + side / 2, x1 + 1, w).item())
+            y2 = int(torch.clamp(yc + side / 2, y1 + 1, h).item())
             crop = image[:, y1:y2, x1:x2].unsqueeze(0)
             crop = F.interpolate(crop, size=(h, w), mode="bilinear", align_corners=False)
             crops.append(crop)
@@ -96,8 +98,8 @@ class MultiTaskPerceptionModel(nn.Module):
         """
         
         localization = self.localizer(x)
-        cropped_x = self._crop_from_boxes(x, localization.detach())
-        classification = self.classifier(cropped_x)
+        # Use the same full-image distribution as classifier training.
+        classification = self.classifier(x)
         segmentation = self.segmenter(x)
 
         return {
