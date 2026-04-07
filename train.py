@@ -27,10 +27,10 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 20
-LOCALIZER_EPOCHS = 10
-SEGMENTER_EPOCHS = 10
-CLASSIFIER_LR = 1e-3
+CLASSIFIER_EPOCHS = 50
+LOCALIZER_EPOCHS = 20
+SEGMENTER_EPOCHS = 20
+CLASSIFIER_LR = 1e-4
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -194,7 +194,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
         train_correct = 0
         train_total = 0
 
-        for step, (images, labels, _, _) in enumerate(train_loader, start=1):
+        for step, (images, labels, _, _) in enumerate(train_loader):
             images = images.to(DEVICE)
             labels = labels.to(DEVICE)
 
@@ -463,11 +463,11 @@ def train(
 
     # Classification was collapsing with crop-only training. Use full normalized images
     # so train/val/inference distributions stay aligned.
-    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=False)
+    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=True)
     task_train_loader, task_val_loader = build_loaders(crop_for_classification=False)
 
     # Keep the classifier simpler and more stable; BN was hurting validation generalization.
-    classifier = VGG11Classifier(dropout_p=max(dropout_p, 0.3), use_batchnorm=False).to(DEVICE)
+    classifier = VGG11Classifier(dropout_p=0.3, use_batchnorm=True).to(DEVICE)
     best_cls_f1 = train_classifier(classifier, cls_train_loader, cls_val_loader)
     load_checkpoint_into_model(classifier, "classifier.pth")
     encoder_state = classifier.encoder.state_dict()
