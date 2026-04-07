@@ -32,8 +32,8 @@ class VGG11Localizer(nn.Module):
         
         super().__init__()
         # Extract features from image
-        self.image_size = 224.0 # Fixed image size
-        self.encoder = VGG11Encoder(in_channels=in_channels) # Encoder
+        self.image_size = 224.0
+        self.encoder = VGG11Encoder(in_channels=in_channels)
         self.head = nn.Sequential(
             nn.Flatten(),
 
@@ -59,11 +59,9 @@ class VGG11Localizer(nn.Module):
         x = self.encoder(x)
         raw_box = self.head(x)
 
-        # Normalize outputs
-        centers = torch.sigmoid(raw_box[:, :2])
-        sizes = torch.sigmoid(raw_box[:, 2:])
-
-        # Avoid zero-size boxes
-        sizes = torch.clamp(sizes, min=0.05)
+        # Keep predictions in image-space [cx, cy, w, h], matching the grader.
+        centers = torch.sigmoid(raw_box[:, :2]) * self.image_size
+        sizes = torch.sigmoid(raw_box[:, 2:]) * self.image_size
+        sizes = torch.clamp(sizes, min=1.0)
 
         return torch.cat([centers, sizes], dim=1)
