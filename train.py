@@ -31,7 +31,7 @@ from losses.iou_loss import IoULoss
 # Configuration
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 8
-EPOCHS = 5
+EPOCHS = 20
 LR = 3e-4
 
 # GLOBAL NORMALIZATION FIX
@@ -158,8 +158,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
     cls_loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
     loc_loss_fn = nn.MSELoss()
     iou_loss_fn = IoULoss()
-    seg_loss_fn = nn.CrossEntropyLoss(
-                  weight=torch.tensor([0.5, 1.5, 1.5]).to(DEVICE))
+    seg_loss_fn = nn.CrossEntropyLoss()
 
     # Optimizers
     cls_opt = optim.Adam(classifier.parameters(), lr=LR)
@@ -388,5 +387,5 @@ if __name__ == "__main__":
      #   train(dropout_p=d, freeze_mode="full")
 
     # TRANSFER LEARNING EXPERIMENTS
-    #for mode in ["freeze", "partial", "full"]:
-     #   train(dropout_p=0.5, freeze_mode=mode)    
+  #for mode in ["freeze", "partial", "full"]:
+   #     train(dropout_p=0.5, freeze_mode=mode)    
