@@ -272,8 +272,16 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
         dice_avg = dice_total / len(val_loader)
         acc_avg = acc_total / len(val_loader)
-        vis_images = images
-        vis_masks = masks
+        
+        vis_images, vis_labels, vis_bboxes, vis_masks = next(iter(val_loader))
+
+        vis_images = vis_images.to(DEVICE)
+        vis_masks = vis_masks.to(DEVICE)
+        vis_bboxes = vis_bboxes.to(DEVICE)
+
+        with torch.no_grad():
+            vis_seg_out = segmenter(vis_images)
+            vis_loc_out = localizer(vis_images)
         
         with torch.no_grad():
             x = images
@@ -309,16 +317,16 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
         img_np = (img_vis * 255).astype(np.uint8)
 
-        gt_box = bboxes[0].cpu().numpy()
-        pred_box = loc_out[0].detach().cpu().numpy()
+        pred_box = vis_loc_out[0].detach().cpu().numpy()
+        gt_box = vis_bboxes[0].detach().cpu().numpy()
         
         img_gt = draw_box(img_np, gt_box, [0,255,0])     # green GT
         img_pred = draw_box(img_gt, pred_box, [255,0,0]) # red pred
         
         gt = vis_masks[0].cpu()
-        pred = torch.argmax(seg_out[0], dim=0).cpu()
+        pred = torch.argmax(vis_seg_out[0], dim=0)
         with torch.no_grad():
-            feature = segmenter.encoder(images)
+            feature = segmenter.encoder(vis_images)
 
         feature = feature.detach().cpu()
         # convert [512,7,7] → [7,7]
@@ -327,10 +335,9 @@ def train(dropout_p=0.5, freeze_mode="full"):
         fm_vis = fm.numpy()
         fm_vis = (fm_vis - fm_vis.min()) / (fm_vis.max() - fm_vis.min() + 1e-6)
         
-        iou = compute_iou(
-            loc_out[0].detach().cpu().numpy(),
-            bboxes[0].detach().cpu().numpy())
-        
+        iou_i = compute_iou(
+                vis_loc_out[0].detach().cpu().numpy(),
+                vis_bboxes[0].detach().cpu().numpy())
 
         wandb.log({
             "epoch": epoch,
@@ -339,7 +346,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
             "train_seg_loss": total_seg,
             "val_dice": dice_avg,
             "val_pixel_acc": acc_avg,
-            "iou": iou,
+            "iou": iou_i,
             
             # Image
             "input": wandb.Image(img_np),
@@ -355,7 +362,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
                  (last_map.numpy().max() - last_map.numpy().min() + 1e-6) * 255).astype(np.uint8)
             ),
 
-            # Feature map (FIXED)
+            # Feature map
             "feature_map": wandb.Image(
                 ((fm_vis - fm_vis.min()) / (fm_vis.max() - fm_vis.min() + 1e-6) * 255).astype(np.uint8)
             )
@@ -365,7 +372,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
             wandb.log({
                 f"sample_{i}_input": wandb.Image(denormalize(vis_images[i])),
                 f"sample_{i}_gt": wandb.Image(colorize_mask(vis_masks[i].cpu().numpy())),
-                f"sample_{i}_pred": wandb.Image(colorize_mask(torch.argmax(seg_out[i], dim=0).cpu().numpy()))
+                f"sample_{i}_pred": wandb.Image(colorize_mask(torch.argmax(vis_seg_out[i], dim=0).cpu().numpy()))
             })
 
         table = wandb.Table(columns=["image", "iou"])
@@ -373,9 +380,8 @@ def train(dropout_p=0.5, freeze_mode="full"):
         for i in range(min(5, vis_images.shape[0])):
             img_i = denormalize(vis_images[i])
             iou_i = compute_iou(
-                loc_out[i].detach().cpu().numpy(),
-                bboxes[i].detach().cpu().numpy()
-            )
+                    vis_loc_out[i].detach().cpu().numpy(),
+                    vis_bboxes[i].detach().cpu().numpy())
             table.add_data(wandb.Image(img_i), iou_i)
         
         wandb.log({"IoU_table": table})
