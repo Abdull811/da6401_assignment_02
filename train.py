@@ -158,7 +158,8 @@ def train(dropout_p=0.5, freeze_mode="full"):
     cls_loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
     loc_loss_fn = nn.MSELoss()
     iou_loss_fn = IoULoss()
-    seg_loss_fn = nn.CrossEntropyLoss()
+    seg_loss_fn = nn.CrossEntropyLoss(
+                  weight=torch.tensor([0.5, 1.5, 1.5]).to(DEVICE))
 
     # Optimizers
     cls_opt = optim.Adam(classifier.parameters(), lr=LR)
@@ -195,6 +196,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
             cls_opt.zero_grad()
             cls_loss.backward()
+            torch.nn.utils.clip_grad_norm_(classifier.parameters(), 5.0)
             cls_opt.step()
 
             # Localization
@@ -207,7 +209,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
             # Segmentation
             seg_out = segmenter(images)
-            seg_loss = seg_loss_fn(seg_out, masks) + 2 * dice_loss(seg_out, masks)
+            seg_loss = seg_loss_fn(seg_out, masks) + 1.0 * dice_loss(seg_out, masks)
             print("Pred classes:", torch.unique(torch.argmax(seg_out, dim=1)))
 
             seg_opt.zero_grad()
