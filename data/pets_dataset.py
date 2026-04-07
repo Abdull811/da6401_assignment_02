@@ -122,7 +122,12 @@ class OxfordIIITPetDataset(Dataset):
             w = max(x2 - x1, 1)
             h = max(y2 - y1, 1)
         
-            bbox = torch.tensor([cx, cy, w, h], dtype=torch.float32)
+            bbox = torch.tensor([
+                cx / 224.0,
+                cy / 224.0,
+                w / 224.0,
+                h / 224.0
+            ], dtype=torch.float32)
         
         return image, label, bbox, mask
     
