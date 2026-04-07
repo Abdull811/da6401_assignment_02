@@ -22,6 +22,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from data.pets_dataset import OxfordIIITPetDataset
+from models.vgg11 import VGG11Encoder
 from models.classification import VGG11Classifier
 from models.localization import VGG11Localizer
 from models.segmentation import VGG11UNet
@@ -55,14 +56,28 @@ def colorize_mask(mask):
     
 def draw_box(img, box, color):
     img = img.copy()
+
+    H, W, _ = img.shape
+
     xc, yc, w, h = box
+
+    # Convert normalized → pixel
+    xc *= W
+    yc *= H
+    w *= W
+    h *= H
 
     x1 = int(xc - w/2)
     y1 = int(yc - h/2)
     x2 = int(xc + w/2)
     y2 = int(yc + h/2)
 
-    # Draw rectangle manually
+    # Clamp to image boundaries
+    x1 = max(0, min(x1, W-1))
+    x2 = max(0, min(x2, W-1))
+    y1 = max(0, min(y1, H-1))
+    y2 = max(0, min(y2, H-1))
+
     img[y1:y1+2, x1:x2] = color
     img[y2-2:y2, x1:x2] = color
     img[y1:y2, x1:x1+2] = color
@@ -139,9 +154,16 @@ def train(dropout_p=0.5, freeze_mode="full"):
     )
 
     # Models
-    classifier = VGG11Classifier(dropout_p=dropout_p).to(DEVICE)
-    localizer = VGG11Localizer(dropout_p=dropout_p).to(DEVICE)
-    segmenter = VGG11UNet(dropout_p=dropout_p).to(DEVICE)
+    encoder = VGG11Encoder().to(DEVICE)
+
+    classifier = VGG11Classifier().to(DEVICE)
+    localizer = VGG11Localizer().to(DEVICE)
+    segmenter = VGG11UNet().to(DEVICE)
+    
+    # SHARE ENCODER
+    classifier.encoder = encoder
+    localizer.encoder = encoder
+    segmenter.encoder = encoder
 
     # Transfer Learning control
     # Freeze modes
@@ -371,9 +393,9 @@ def train(dropout_p=0.5, freeze_mode="full"):
         print(f"Validation → Dice={dice_avg:.3f}, Acc={acc_avg:.3f}")
 
     # SAVE MODELS
-    torch.save(classifier.state_dict(), "classifier.pth")
-    torch.save(localizer.state_dict(), "localizer.pth")
-    torch.save(segmenter.state_dict(), "unet.pth")
+    torch.save({"state_dict": classifier.state_dict()}, "classifier.pth")
+    torch.save({"state_dict": localizer.state_dict()}, "localizer.pth")
+    torch.save({"state_dict": segmenter.state_dict()}, "unet.pth")
 
     wandb.finish()
 
