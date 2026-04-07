@@ -36,7 +36,7 @@ class MultiTaskPerceptionModel(nn.Module):
         #gdown.download(id="1RfaqmEep6YkevPyA-2-ZwOTNnVlyOeub", output=unet_path, quiet=False)
 
         # Shared Backbone
-        self.encoder = VGG11Encoder(in_channels)
+        #self.encoder = VGG11Encoder(in_channels)
 
         # Heads
         self.classifier = VGG11Classifier(num_breeds)
@@ -69,21 +69,9 @@ class MultiTaskPerceptionModel(nn.Module):
             - 'segmentation': [B, seg_classes, H, W] segmentation logits tensor
         """
         
-        # Shared feature extraction
-        features = self.encoder(x)
-
-        # Classification
-        cls_out = self.classifier(features)
-
-        # Localization
-        loc_out = self.localizer(x)
-
-        # Segmentation
-        seg_out = self.segmenter(x)
-
         return {
-            "classification": cls_out,
-            "localization": loc_out,
-            "segmentation": seg_out,
-        }
+        "classification": self.classifier(x),  
+        "localization": self.localizer(x),
+        "segmentation": self.segmenter(x),
+    }
     
