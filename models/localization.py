@@ -64,6 +64,6 @@ class VGG11Localizer(nn.Module):
         sizes = torch.sigmoid(raw_box[:, 2:])
 
         # Avoid zero-size boxes
-        sizes = torch.clamp(sizes, min=1.0)
+        sizes = torch.clamp(sizes, min=0.05)
 
         return torch.cat([centers, sizes], dim=1)
