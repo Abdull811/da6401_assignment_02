@@ -69,6 +69,11 @@ def draw_box(img, box, color):
     x2 = int(xc + w/2)
     y2 = int(yc + h/2)
 
+    x1 = max(0, min(x1, img.shape[1] - 1))
+    x2 = max(0, min(x2, img.shape[1] - 1))
+    y1 = max(0, min(y1, img.shape[0] - 1))
+    y2 = max(0, min(y2, img.shape[0] - 1))
+
     img[y1:y1+2, x1:x2] = color
     img[y2-2:y2, x1:x2] = color
     img[y1:y2, x1:x1+2] = color
