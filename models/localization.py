@@ -21,7 +21,7 @@ from models.vgg11 import VGG11Encoder
 class VGG11Localizer(nn.Module):
     """VGG11-based localizer."""
 
-    def __init__(self, in_channels: int = 3, dropout_p: float = 0.5):
+    def __init__(self, in_channels: int = 3, dropout_p: float = 0.5, use_batchnorm: bool = True):
         """
         Initialize the VGG11Localizer model.
 
@@ -33,7 +33,7 @@ class VGG11Localizer(nn.Module):
         super().__init__()
         # Extract features from image
         self.image_size = 224.0
-        self.encoder = VGG11Encoder(in_channels=in_channels)
+        self.encoder = VGG11Encoder(in_channels=in_channels, use_batchnorm=use_batchnorm)
         self.head = nn.Sequential(
             nn.Flatten(),
 
