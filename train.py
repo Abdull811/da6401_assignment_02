@@ -58,7 +58,8 @@ def draw_box(img, box, color):
 
     H, W, _ = img.shape
 
-    # Convert normalized → pixel
+    xc, yc, w, h = box  
+
     xc *= W
     yc *= H
     w *= W
@@ -69,7 +70,6 @@ def draw_box(img, box, color):
     x2 = int(xc + w/2)
     y2 = int(yc + h/2)
 
-    # Clamp to image boundaries
     x1 = max(0, min(x1, W-1))
     x2 = max(0, min(x2, W-1))
     y1 = max(0, min(y1, H-1))
