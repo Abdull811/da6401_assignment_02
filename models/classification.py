@@ -37,17 +37,17 @@ class VGG11Classifier(nn.Module):
         super().__init__()
         # Encoder: Extract features from image using VGG11
         self.encoder = VGG11Encoder(in_channels, use_batchnorm=use_batchnorm)
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.max_pool = nn.AdaptiveMaxPool2d((1, 1))
         
         # Classification head
         self.classifier = nn.Sequential(
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Flatten(),
-            nn.Linear(512, 512),
-            *( [nn.BatchNorm1d(512)] if use_batchnorm else [] ),
+            nn.Linear(1024, 768),
+            *([nn.BatchNorm1d(768)] if use_batchnorm else []),
             nn.ReLU(inplace=True),
             CustomDropout(dropout_p),
-            nn.Linear(512, 256),
-            *( [nn.BatchNorm1d(256)] if use_batchnorm else [] ),
+            nn.Linear(768, 256),
+            *([nn.BatchNorm1d(256)] if use_batchnorm else []),
             nn.ReLU(inplace=True),
             CustomDropout(dropout_p),
             nn.Linear(256, num_classes)
@@ -62,8 +62,10 @@ class VGG11Classifier(nn.Module):
         """
 
         x = self.encoder(x)
-        x = self.classifier(x)
-        return x
+        avg_feat = torch.flatten(self.avg_pool(x), 1)
+        max_feat = torch.flatten(self.max_pool(x), 1)
+        feat = torch.cat([avg_feat, max_feat], dim=1)
+        return self.classifier(feat)
 
 class VGG11(VGG11Encoder):
     pass
