@@ -19,7 +19,13 @@ from models.vgg11 import VGG11Encoder
 class VGG11Classifier(nn.Module):
     """Full classifier = VGG11 + ClassificationHead."""
 
-    def __init__(self, num_classes: int = 37, in_channels: int = 3, dropout_p: float = 0.5):
+    def __init__(
+        self,
+        num_classes: int = 37,
+        in_channels: int = 3,
+        dropout_p: float = 0.5,
+        use_batchnorm: bool = True,
+    ):
         """
         Initialize the VGG11Classifier model.
         Args:
@@ -30,22 +36,21 @@ class VGG11Classifier(nn.Module):
         
         super().__init__()
         # Encoder: Extract features from image using VGG11
-        self.encoder = VGG11Encoder(in_channels)
+        self.encoder = VGG11Encoder(in_channels, use_batchnorm=use_batchnorm)
         
         # Classification head
         self.classifier = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(512 * 7 * 7, 4096),
-            nn.BatchNorm1d(4096),
+            nn.Linear(512, 512),
+            *( [nn.BatchNorm1d(512)] if use_batchnorm else [] ),
             nn.ReLU(inplace=True),
             CustomDropout(dropout_p),
-
-            nn.Linear(4096, 4096),
-            nn.BatchNorm1d(4096),
+            nn.Linear(512, 256),
+            *( [nn.BatchNorm1d(256)] if use_batchnorm else [] ),
             nn.ReLU(inplace=True),
             CustomDropout(dropout_p),
-
-            nn.Linear(4096, num_classes)
+            nn.Linear(256, num_classes)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
