@@ -40,7 +40,7 @@ class MultiTaskPerceptionModel(nn.Module):
 
         # Heads
         self.classifier_head = VGG11Classifier(num_breeds).classifier
-        self.localizer_head = VGG11Localizer().head
+        self.localizer = VGG11Localizer()
         self.segmenter = VGG11UNet(seg_classes)
 
         # Load weights
@@ -76,7 +76,7 @@ class MultiTaskPerceptionModel(nn.Module):
         cls_out = self.classifier_head(features)
 
         # Localization
-        loc_out = self.localizer_head(features)
+        loc_out = self.localizer_head(x)
 
         # Segmentation
         seg_out = self.segmenter(x)
