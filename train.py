@@ -199,7 +199,7 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
             # Localization
             loc_out = localizer(images)
-            loc_loss = loc_loss_fn(loc_out, bboxes) + iou_loss_fn(loc_out, bboxes)
+            loc_loss = 0.5 * loc_loss_fn(loc_out, bboxes) + iou_loss_fn(loc_out, bboxes)
 
             loc_opt.zero_grad()
             loc_loss.backward()
