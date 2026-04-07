@@ -119,8 +119,8 @@ class OxfordIIITPetDataset(Dataset):
         
             cx = (x1 + x2) / 2
             cy = (y1 + y2) / 2
-            w = x2 - x1
-            h = y2 - y1
+            w = max(x2 - x1)
+            h = max(y2 - y1)
         
             bbox = torch.tensor([cx, cy, w, h], dtype=torch.float32)
         
