@@ -207,7 +207,8 @@ def train(dropout_p=0.5, freeze_mode="full"):
 
             # Segmentation
             seg_out = segmenter(images)
-            seg_loss = seg_loss_fn(seg_out, masks) + dice_loss(seg_out, masks)
+            seg_loss = seg_loss_fn(seg_out, masks) + 2* dice_loss(seg_out, masks)
+            print("Pred classes:", torch.unique(torch.argmax(seg_out, dim=1)))
 
             seg_opt.zero_grad()
             seg_loss.backward()
