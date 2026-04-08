@@ -27,9 +27,9 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 20
-LOCALIZER_EPOCHS = 20
-SEGMENTER_EPOCHS = 20
+CLASSIFIER_EPOCHS = 50
+LOCALIZER_EPOCHS = 12
+SEGMENTER_EPOCHS = 12
 CLASSIFIER_LR = 1e-3
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
@@ -174,11 +174,17 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    optimizer = torch.optim.Adam(model.parameters(), lr=3e-4, weight_decay=1e-4)
-    #scheduler = optim.lr_scheduler.MultiStepLR(
-    #   optimizer,
-    #    milestones=[20, 35, 45],
-    #    gamma=0.1,)
+    optimizer = optim.SGD(
+        model.parameters(),
+        lr=CLASSIFIER_LR,
+        momentum=0.9,
+        weight_decay=5e-4,
+        nesterov=True,)
+
+    scheduler = optim.lr_scheduler.MultiStepLR(
+       optimizer,
+        milestones=[20, 35, 45],
+        gamma=0.1,)
     
     best_f1 = -1.0
 
@@ -236,7 +242,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
         macro_f1 = f1_score(y_true, y_pred, average="macro")
         train_acc = train_correct / max(train_total, 1)
         val_acc = val_correct / max(val_total, 1)
-        # scheduler.step()
+        scheduler.step()
 
         wandb.log(
             {
@@ -365,15 +371,7 @@ def train_segmenter(
     best_dice = -1.0
 
     for epoch in range(1, SEGMENTER_EPOCHS + 1):
-        model.train()
-        # stabilize learning
-        if epoch <= 5:
-            for param in model.encoder.parameters():
-                param.requires_grad = False
-        else:
-            for param in model.encoder.parameters():
-                param.requires_grad = True
-                
+        model.train()         
         train_loss = 0.0
 
         for step, (images, _, _, masks) in enumerate(train_loader, start=1):
