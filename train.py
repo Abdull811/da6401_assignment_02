@@ -30,7 +30,7 @@ BATCH_SIZE = 32
 CLASSIFIER_EPOCHS = 20
 LOCALIZER_EPOCHS = 20
 SEGMENTER_EPOCHS = 20
-CLASSIFIER_LR = 1e-4
+CLASSIFIER_LR = 1e-3
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -174,10 +174,12 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(
+    optimizer = optim.SGD(
         model.parameters(),
         lr=CLASSIFIER_LR,
-        weight_decay=1e-4
+        momentum=0.9,
+        weight_decay=5e-4,
+        nesterov=True,
     )
     scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
@@ -465,7 +467,7 @@ def train(
     task_train_loader, task_val_loader = build_loaders(crop_for_classification=False)
 
     # Keep the classifier simpler and more stable; BN was hurting validation generalization.
-    classifier = VGG11Classifier(dropout_p=0.2, use_batchnorm=True).to(DEVICE)
+    classifier = VGG11Classifier(dropout_p=0.3, use_batchnorm=False).to(DEVICE)
     best_cls_f1 = train_classifier(classifier, cls_train_loader, cls_val_loader)
     load_checkpoint_into_model(classifier, "classifier.pth")
     encoder_state = classifier.encoder.state_dict()
