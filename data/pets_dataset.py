@@ -56,7 +56,11 @@ class OxfordIIITPetDataset(Dataset):
                     ]
                 )
         transforms.append(
-            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+            A.Normalize(
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225),
+                max_pixel_value=1.0,
+            )
         )
         self.transform = A.Compose(transforms)
 
@@ -163,7 +167,7 @@ class OxfordIIITPetDataset(Dataset):
         label = torch.tensor(self.labels[name]).long()
         
         # BBOX
-        ys, xs = np.where(mask == 1)
+        ys, xs = np.where(mask > 0)
 
         if len(xs) == 0 or len(ys) == 0:
             bbox = torch.tensor([112,112,50,50], dtype=torch.float32)
