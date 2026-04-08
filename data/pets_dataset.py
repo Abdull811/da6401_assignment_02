@@ -30,6 +30,8 @@ class OxfordIIITPetDataset(Dataset):
             self.split_file = os.path.join(root, "annotations", "trainval.txt")
         elif split == "val":
             self.split_file = os.path.join(root, "annotations", "test.txt")
+        else:
+            raise ValueError("split must be 'train' or 'val'")
 
         # TRANSFORM
         transforms = [A.Resize(224, 224)]
@@ -39,10 +41,10 @@ class OxfordIIITPetDataset(Dataset):
                     [
                         A.HorizontalFlip(p=0.5),
                         A.RandomBrightnessContrast(p=0.25),
-                        A.ShiftScaleRotate(
-                            shift_limit=0.03,
-                            scale_limit=0.08,
-                            rotate_limit=12,
+                        A.Affine(
+                            translate_percent=(-0.03, 0.03),
+                            scale=(0.92, 1.08),
+                            rotate=(-12, 12),
                             border_mode=0,
                             p=0.4,
                         ),
