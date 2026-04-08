@@ -3,7 +3,6 @@ import sys
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
@@ -69,22 +68,6 @@ class MultiTaskPerceptionModel(nn.Module):
                 module.load_state_dict(ckpt, strict=False)
         except Exception as exc:
             print(f"Warning: could not load {resolved_path}: {exc}")
-
-    def _crop_from_boxes(self, x: torch.Tensor, boxes: torch.Tensor, margin: float = 0.25) -> torch.Tensor:
-        crops = []
-        _, _, h, w = x.shape
-        for image, box in zip(x, boxes):
-            xc, yc, bw, bh = box
-            side = max(float(bw), float(bh)) * (1.0 + margin)
-            side = max(side, 8.0)
-            x1 = int(torch.clamp(xc - side / 2, 0, w - 1).item())
-            y1 = int(torch.clamp(yc - side / 2, 0, h - 1).item())
-            x2 = int(torch.clamp(xc + side / 2, x1 + 1, w).item())
-            y2 = int(torch.clamp(yc + side / 2, y1 + 1, h).item())
-            crop = image[:, y1:y2, x1:x2].unsqueeze(0)
-            crop = F.interpolate(crop, size=(h, w), mode="bilinear", align_corners=False)
-            crops.append(crop)
-        return torch.cat(crops, dim=0)
        
     def forward(self, x: torch.Tensor):
         """Forward pass for multi-task model.
@@ -97,14 +80,9 @@ class MultiTaskPerceptionModel(nn.Module):
             - 'segmentation': [B, seg_classes, H, W] segmentation logits tensor
         """
         
-        localization = self.localizer(x)
-        # Use the same full-image distribution as classifier training.
-        classification = self.classifier(x)
-        segmentation = self.segmenter(x)
-
         return {
-            "classification": classification,
-            "localization": localization,
-            "segmentation": segmentation,
-        }
+        "classification": self.classifier(x),  
+        "localization": self.localizer(x),
+        "segmentation": self.segmenter(x),
+    }
     
