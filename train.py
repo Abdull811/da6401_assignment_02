@@ -27,10 +27,10 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 50
+CLASSIFIER_EPOCHS = 60
 LOCALIZER_EPOCHS = 12
 SEGMENTER_EPOCHS = 12
-CLASSIFIER_LR = 1e-3
+CLASSIFIER_LR = 5e-3
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -173,7 +173,7 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
     optimizer = optim.SGD(
         model.parameters(),
         lr=CLASSIFIER_LR,
@@ -183,7 +183,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
 
     scheduler = optim.lr_scheduler.MultiStepLR(
        optimizer,
-        milestones=[20, 35, 45],
+        milestones=[25, 45, 55],
         gamma=0.1,)
     
     best_f1 = -1.0
@@ -194,7 +194,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
         train_correct = 0
         train_total = 0
 
-        for step, (images, labels, _, _) in enumerate(train_loader):
+        for step, (images, labels, _, _) in enumerate(train_loader, start=1):
             images = images.to(DEVICE)
             labels = labels.to(DEVICE)
 
@@ -461,13 +461,12 @@ def train(
         mode=wandb_mode,
     )
 
-    # Classification was collapsing with crop-only training. Use full normalized images
-    # so train/val/inference distributions stay aligned.
-    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=False)
+    # Use tighter pet crops for classification now that crop targets are corrected.
+    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=True)
     task_train_loader, task_val_loader = build_loaders(crop_for_classification=False)
 
-    # Keep the classifier simpler and more stable; BN was hurting validation generalization.
-    classifier = VGG11Classifier(dropout_p=0.3, use_batchnorm=False).to(DEVICE)
+    # Keep the classifier simpler and more stable; lower dropout helps fine-grained breeds.
+    classifier = VGG11Classifier(dropout_p=0.1, use_batchnorm=False).to(DEVICE)
     best_cls_f1 = train_classifier(classifier, cls_train_loader, cls_val_loader)
     load_checkpoint_into_model(classifier, "classifier.pth")
     encoder_state = classifier.encoder.state_dict()
