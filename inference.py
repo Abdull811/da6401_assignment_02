@@ -10,11 +10,9 @@ import numpy as np
 import torch
 import wandb
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
-
-os.environ["WANDB_API_KEY"] = "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"
 
 from models.multitask import MultiTaskPerceptionModel
 
@@ -57,7 +55,11 @@ def preprocess_image(path: str) -> tuple[np.ndarray, torch.Tensor]:
     transform = A.Compose(
         [
             A.Resize(224, 224),
-            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+            A.Normalize(
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225),
+                max_pixel_value=1.0,
+            ),
         ]
     )
     image_norm = transform(image=image)["image"]
