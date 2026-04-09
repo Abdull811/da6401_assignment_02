@@ -200,7 +200,7 @@ def log_comparison_plots():
 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
     optimizer = optim.Adam(
         model.parameters(),
         lr=CLASSIFIER_LR,
@@ -300,7 +300,7 @@ def train_localizer(
     train_loader: DataLoader,
     val_loader: DataLoader,
 ) -> float:
-    model.encoder.load_state_dict(encoder_state, strict=True)
+    model.encoder.load_state_dict(encoder_state, strict=False)
     criterion_reg = nn.SmoothL1Loss(beta=5.0)
     criterion_iou = IoULoss()
     optimizer = optim.Adam(model.parameters(), lr=LOCALIZER_LR, weight_decay=1e-5)
@@ -389,7 +389,7 @@ def train_segmenter(
     val_loader: DataLoader,
     freeze_mode: str,
 ) -> float:
-    model.encoder.load_state_dict(encoder_state, strict=True)
+    model.encoder.load_state_dict(encoder_state, strict=False)
     set_segmentation_freeze_mode(model, freeze_mode)
     criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([0.1, 1.0, 2.0], device=DEVICE))
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=SEGMENTER_LR, weight_decay=1e-5)
