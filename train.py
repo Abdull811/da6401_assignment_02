@@ -181,9 +181,9 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
     )
     scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
-        milestones=[20, 35, 45],
+        #milestones=[20, 35, 45],
         T_max=CLASSIFIER_EPOCHS,
-        gamma=0.1,
+        #gamma=0.1,
     )
     best_f1 = -1.0
 
