@@ -41,6 +41,8 @@ class OxfordIIITPetDataset(Dataset):
                     [
                         A.HorizontalFlip(p=0.5),
                         A.RandomBrightnessContrast(p=0.25),
+                        A.HorizontalFlip(p=0.5),
+                        A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
                         A.Affine(
                             translate_percent=(-0.03, 0.03),
                             scale=(0.92, 1.08),
