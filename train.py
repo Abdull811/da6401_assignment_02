@@ -173,11 +173,11 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = optim.Adam(
         model.parameters(),
         lr=CLASSIFIER_LR,
-        weight_decay=1e-5
+        weight_decay=1e-4
     )
     scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
