@@ -171,36 +171,36 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
         "last_layer_feature": wandb.Image(bottleneck),
     }
 
-def log_comparison_plots():
-    import matplotlib.pyplot as plt
-    api = wandb.Api()
-    runs = api.runs("ge26z811-zan/da6401_assignment_02")
+#def log_comparison_plots():
+#    import matplotlib.pyplot as plt
+#    api = wandb.Api()
+#    runs = api.runs("ge26z811-zan/da6401_assignment_02")
 
     # Classification Loss Comparison
-    plt.figure()
-    for run in runs:
-        hist = run.history(keys=["cls_train_loss"])
-        if "cls_train_loss" in hist:
-            plt.plot(hist["cls_train_loss"], label=run.name)
-    plt.legend()
-    plt.title("Classification Loss Comparison")
-    wandb.log({"comparison_cls_loss": wandb.Image(plt)})
-    plt.close()
+#    plt.figure()
+#    for run in runs:
+#        hist = run.history(keys=["cls_train_loss"])
+#        if "cls_train_loss" in hist:
+ #           plt.plot(hist["cls_train_loss"], label=run.name)
+ #   plt.legend()
+  #  plt.title("Classification Loss Comparison")
+   # wandb.log({"comparison_cls_loss": wandb.Image(plt)})
+    #plt.close()
 
     # Dice Comparison
-    plt.figure()
-    for run in runs:
-        hist = run.history(keys=["val_dice"])
-        if "val_dice" in hist:
-            plt.plot(hist["val_dice"], label=run.name)
-    plt.legend()
-    plt.title("Dice Score Comparison")
-    wandb.log({"comparison_dice": wandb.Image(plt)})
-    plt.close()
+   # plt.figure()
+    #for run in runs:
+     #   hist = run.history(keys=["val_dice"])
+      #  if "val_dice" in hist:
+       #     plt.plot(hist["val_dice"], label=run.name)
+    #plt.legend()
+    #plt.title("Dice Score Comparison")
+    #wandb.log({"comparison_dice": wandb.Image(plt)})
+    #plt.close()
 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = optim.Adam(
         model.parameters(),
         lr=CLASSIFIER_LR,
@@ -505,7 +505,7 @@ def train(
     wandb.summary["best_cls_macro_f1"] = best_cls_f1
     wandb.summary["best_loc_iou"] = best_loc_iou
     wandb.summary["best_seg_dice"] = best_seg_dice
-    log_comparison_plots()
+    #log_comparison_plots()
     wandb.finish()
 
 
