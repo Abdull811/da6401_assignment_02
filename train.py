@@ -487,7 +487,7 @@ def train(
         mode=wandb_mode,
     )
 
-    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=True)
+    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=False)
     task_train_loader, task_val_loader = build_loaders(crop_for_classification=False)
 
     classifier = VGG11Classifier(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
