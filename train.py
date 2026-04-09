@@ -27,10 +27,10 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 20
-LOCALIZER_EPOCHS = 10
-SEGMENTER_EPOCHS = 10
-CLASSIFIER_LR = 3e-4
+CLASSIFIER_EPOCHS = 50
+LOCALIZER_EPOCHS = 20
+SEGMENTER_EPOCHS = 20
+CLASSIFIER_LR = 1e-4
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -181,7 +181,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
     )
     scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
-        milestones=[5, 10, 15],
+        milestones=[20, 35, 45],
         gamma=0.1,
     )
     best_f1 = -1.0
