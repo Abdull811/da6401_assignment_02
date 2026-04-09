@@ -97,8 +97,10 @@ def predict_image(model: MultiTaskPerceptionModel, image_path: str) -> dict:
 
 def run_showcase(image_paths, project: str = "da6401_assignment_02_showcase", run_name: str = "novel_images") -> None:
     model = MultiTaskPerceptionModel()
+    
     wandb.init(project=project, name=run_name, mode="online")
-
+    model.load_state_dict(torch.load("checkpoints/unet.pth")["state_dict"], strict=False)
+    model.eval()
     table = wandb.Table(columns=["path", "label", "confidence", "image", "bbox", "mask"])
     for image_path in image_paths:
         pred = predict_image(model, image_path)
