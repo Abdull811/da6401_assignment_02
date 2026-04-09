@@ -173,15 +173,16 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
 
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = optim.Adam(
         model.parameters(),
         lr=CLASSIFIER_LR,
-        weight_decay=1e-4
+        weight_decay=5e-4
     )
     scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
         milestones=[20, 35, 45],
+        T_max=CLASSIFIER_EPOCHS,
         gamma=0.1,
     )
     best_f1 = -1.0
@@ -200,7 +201,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
             logits = model(images)
             loss = criterion(logits, labels)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
             train_loss += loss.item()
@@ -251,6 +252,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
                 "val_cls_acc": val_acc,
                 "cls_lr": optimizer.param_groups[0]["lr"],
                 "conv3_activation": conv3_hist,
+                "bn_mode": "with_bn" if hasattr(model.encoder, "bn1") else "no_bn"
             }
         )
         print(
@@ -336,7 +338,7 @@ def train_localizer(
         )
         print(f"[LOC] Epoch {epoch:02d} | Mean-IoU {mean_iou:.4f}")
 
-        if mean_iou > best_iou:
+        if mean_iou >= best_iou:
             best_iou = mean_iou
             save_checkpoint(model, "localizer.pth", epoch, best_iou)
 
@@ -430,7 +432,7 @@ def train_segmenter(
         )
         print(f"[SEG] Epoch {epoch:02d} | Dice {mean_dice:.4f} | PixelAcc {mean_pixel_acc:.4f}")
 
-        if mean_dice > best_dice:
+        if mean_dice >= best_dice:
             best_dice = mean_dice
             save_checkpoint(model, "unet.pth", epoch, best_dice)
 
