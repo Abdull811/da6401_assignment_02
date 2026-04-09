@@ -174,7 +174,7 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
 def log_comparison_plots():
     import matplotlib.pyplot as plt
     api = wandb.Api()
-    runs = api.runs("da6401_assignment_02")
+    runs = api.runs("ge26z811-zan/da6401_assignment_02")
 
     # Classification Loss Comparison
     plt.figure()
@@ -521,4 +521,4 @@ def run_report_experiments(wandb_mode: str = "online") -> None:
 
 
 if __name__ == "__main__":
-    train(dropout_p=0.1, freeze_mode="full", wandb_mode="online")
+    run_report_experiments()
