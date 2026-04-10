@@ -27,9 +27,9 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 50
-LOCALIZER_EPOCHS = 20
-SEGMENTER_EPOCHS = 20
+CLASSIFIER_EPOCHS = 20
+LOCALIZER_EPOCHS = 10
+SEGMENTER_EPOCHS = 10
 CLASSIFIER_LR = 1e-4
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
@@ -171,35 +171,9 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
         "last_layer_feature": wandb.Image(bottleneck),
     }
 
-def log_comparison_plots():
-    import matplotlib.pyplot as plt
-    api = wandb.Api()
-    runs = api.runs("ge26z811-zan/da6401_assignment_02")
-
-    # Classification Loss Comparison
-    plt.figure()
-    for run in runs:
-        hist = run.history(keys=["cls_train_loss"])
-        if "cls_train_loss" in hist:
-            plt.plot(hist["cls_train_loss"], label=run.name)
-    plt.legend()
-    plt.title("Classification Loss Comparison")
-    wandb.log({"comparison_cls_loss": wandb.Image(plt)})
-    plt.close()
-
-    # Dice Comparison
-    plt.figure()
-    for run in runs:
-        hist = run.history(keys=["val_dice"])
-        if "val_dice" in hist:
-            plt.plot(hist["val_dice"], label=run.name)
-    plt.legend()
-    plt.title("Dice Score Comparison")
-    wandb.log({"comparison_dice": wandb.Image(plt)})
-    plt.close()
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(
         model.parameters(),
         lr=CLASSIFIER_LR,
@@ -226,7 +200,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
             logits = model(images)
             loss = criterion(logits, labels)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
 
             train_loss += loss.item()
@@ -277,7 +251,6 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
                 "val_cls_acc": val_acc,
                 "cls_lr": optimizer.param_groups[0]["lr"],
                 "conv3_activation": conv3_hist,
-                "bn_mode": "with_bn" if hasattr(model.encoder, "bn1") else "no_bn"
             }
         )
         print(
@@ -299,7 +272,7 @@ def train_localizer(
     train_loader: DataLoader,
     val_loader: DataLoader,
 ) -> float:
-    model.encoder.load_state_dict(encoder_state, strict=False)
+    model.encoder.load_state_dict(encoder_state, strict=True)
     criterion_reg = nn.SmoothL1Loss(beta=5.0)
     criterion_iou = IoULoss()
     optimizer = optim.Adam(model.parameters(), lr=LOCALIZER_LR, weight_decay=1e-5)
@@ -363,7 +336,7 @@ def train_localizer(
         )
         print(f"[LOC] Epoch {epoch:02d} | Mean-IoU {mean_iou:.4f}")
 
-        if mean_iou >= best_iou:
+        if mean_iou > best_iou:
             best_iou = mean_iou
             save_checkpoint(model, "localizer.pth", epoch, best_iou)
 
@@ -388,7 +361,7 @@ def train_segmenter(
     val_loader: DataLoader,
     freeze_mode: str,
 ) -> float:
-    model.encoder.load_state_dict(encoder_state, strict=False)
+    model.encoder.load_state_dict(encoder_state, strict=True)
     set_segmentation_freeze_mode(model, freeze_mode)
     criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([0.1, 1.0, 2.0], device=DEVICE))
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=SEGMENTER_LR, weight_decay=1e-5)
@@ -457,7 +430,7 @@ def train_segmenter(
         )
         print(f"[SEG] Epoch {epoch:02d} | Dice {mean_dice:.4f} | PixelAcc {mean_pixel_acc:.4f}")
 
-        if mean_dice >= best_dice:
+        if mean_dice > best_dice:
             best_dice = mean_dice
             save_checkpoint(model, "unet.pth", epoch, best_dice)
 
@@ -504,7 +477,6 @@ def train(
     wandb.summary["best_cls_macro_f1"] = best_cls_f1
     wandb.summary["best_loc_iou"] = best_loc_iou
     wandb.summary["best_seg_dice"] = best_seg_dice
-    log_comparison_plots()
     wandb.finish()
 
 
@@ -520,5 +492,5 @@ def run_report_experiments(wandb_mode: str = "online") -> None:
 
 
 if __name__ == "__main__":
-    train(dropout_p=0.2, freeze_mode="full", wandb_mode="online") 
-    #run_report_experiments()
+    train(dropout_p=0.1, freeze_mode="full", wandb_mode="online")
+    
