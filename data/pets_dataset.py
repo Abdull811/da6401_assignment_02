@@ -1,11 +1,12 @@
 """Dataset loader for Oxford-IIIT Pet"""
 
 import os
-import torch
-import numpy as np
-from torch.utils.data import Dataset
-import matplotlib.image as mpimg
+
 import albumentations as A
+import matplotlib.image as mpimg
+import numpy as np
+import torch
+from torch.utils.data import Dataset
 
 
 class OxfordIIITPetDataset(Dataset):
@@ -16,11 +17,10 @@ class OxfordIIITPetDataset(Dataset):
     - segmentation (trimap)
     """
 
-    def __init__(self, root, split="train", crop_for_classification: bool = False, crop_margin: float = 0.25):
+    def __init__(self, root, split="train", crop_for_classification=False):
         self.root = root
         self.split = split
         self.crop_for_classification = crop_for_classification
-        self.crop_margin = crop_margin
 
         # PATHS
         self.images_dir = os.path.join(root, "images")
@@ -30,41 +30,18 @@ class OxfordIIITPetDataset(Dataset):
             self.split_file = os.path.join(root, "annotations", "trainval.txt")
         elif split == "val":
             self.split_file = os.path.join(root, "annotations", "test.txt")
-        else:
-            raise ValueError("split must be 'train' or 'val'")
 
         # TRANSFORM
         transforms = [A.Resize(224, 224)]
         if split == "train":
-            if crop_for_classification:
-                transforms.extend(
-                    [
-                        A.HorizontalFlip(p=0.5),
-                        A.RandomBrightnessContrast(p=0.25),
-                        # A.HorizontalFlip(p=0.5),
-                        # A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-                        A.Affine(
-                            translate_percent=(-0.03, 0.03),
-                            scale=(0.92, 1.08),
-                            rotate=(-12, 12),
-                            border_mode=0,
-                            p=0.4,
-                        ),
-                    ]
-                )
-            else:
-                transforms.extend(
-                    [
-                        A.HorizontalFlip(p=0.5),
-                        A.RandomBrightnessContrast(p=0.3),
-                    ]
-                )
-        transforms.append(
-            A.Normalize(
-                mean=(0.485, 0.456, 0.406),
-                std=(0.229, 0.224, 0.225),
-                max_pixel_value=1.0,
+            transforms.extend(
+                [
+                    A.HorizontalFlip(p=0.5),
+                    A.RandomBrightnessContrast(p=0.3),
+                ]
             )
+        transforms.append(
+            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
         )
         self.transform = A.Compose(transforms)
 
@@ -131,33 +108,21 @@ class OxfordIIITPetDataset(Dataset):
         
         mask = mask_final
 
-        ys_raw, xs_raw = np.where(mask > 0)
-        if len(xs_raw) == 0 or len(ys_raw) == 0:
-            x1_raw, y1_raw, x2_raw, y2_raw = 0, 0, image.shape[1] - 1, image.shape[0] - 1
-        else:
-            x1_raw, x2_raw = xs_raw.min(), xs_raw.max()
-            y1_raw, y2_raw = ys_raw.min(), ys_raw.max()
-
+        # Crop tightly around the pet for the classification-only loader.
         if self.crop_for_classification:
-            box_w = x2_raw - x1_raw + 1
-            box_h = y2_raw - y1_raw + 1
-            side = int(max(box_w, box_h) * (1.0 + self.crop_margin))
-            side = max(side, 32)
-
-            cx = (x1_raw + x2_raw) // 2
-            cy = (y1_raw + y2_raw) // 2
-
-            x1_crop = max(0, cx - side // 2)
-            y1_crop = max(0, cy - side // 2)
-            x2_crop = min(image.shape[1] - 1, x1_crop + side - 1)
-            y2_crop = min(image.shape[0] - 1, y1_crop + side - 1)
-
-            # Re-anchor the square crop when clipped by image borders.
-            x1_crop = max(0, x2_crop - side + 1)
-            y1_crop = max(0, y2_crop - side + 1)
-
-            image = image[y1_crop : y2_crop + 1, x1_crop : x2_crop + 1]
-            mask = mask[y1_crop : y2_crop + 1, x1_crop : x2_crop + 1]
+            crop_mask = mask != 0
+            ys, xs = np.where(crop_mask)
+            if len(xs) > 0 and len(ys) > 0:
+                x1, x2 = xs.min(), xs.max()
+                y1, y2 = ys.min(), ys.max()
+                pad_x = max(int(0.1 * (x2 - x1 + 1)), 8)
+                pad_y = max(int(0.1 * (y2 - y1 + 1)), 8)
+                x1 = max(0, x1 - pad_x)
+                y1 = max(0, y1 - pad_y)
+                x2 = min(image.shape[1], x2 + pad_x + 1)
+                y2 = min(image.shape[0], y2 + pad_y + 1)
+                image = image[y1:y2, x1:x2]
+                mask = mask[y1:y2, x1:x2]
 
         # APPLY TRANSFORM
         augmented = self.transform(image=image, mask=mask)
@@ -170,8 +135,8 @@ class OxfordIIITPetDataset(Dataset):
 
         label = torch.tensor(self.labels[name]).long()
         
-        # BBOX
-        ys, xs = np.where(mask > 0)
+        # BBOX: include the pet boundary as part of the object extent.
+        ys, xs = np.where(mask != 0)
 
         if len(xs) == 0 or len(ys) == 0:
             bbox = torch.tensor([112,112,50,50], dtype=torch.float32)
