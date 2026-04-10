@@ -90,18 +90,32 @@ class OxfordIIITPetDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
+        def _read_tag_value(self, text: str, tag: str) -> float:
+        start_token = f"<{tag}>"
+        end_token = f"</{tag}>"
+        start = text.find(start_token)
+        end = text.find(end_token)
+        if start == -1 or end == -1:
+            raise ValueError(f"Tag {tag} not found")
+        start += len(start_token)
+        return float(text[start:end].strip())
+
+    def _load_xml_bbox(self, xml_path: str):
+        with open(xml_path, "r", encoding="utf-8") as f:
+            text = f.read()
+
+        xmin = self._read_tag_value(text, "xmin") - 1.0
+        ymin = self._read_tag_value(text, "ymin") - 1.0
+        xmax = self._read_tag_value(text, "xmax") - 1.0
+        ymax = self._read_tag_value(text, "ymax") - 1.0
+
+        return [xmin, ymin, xmax, ymax]
+
     def __getitem__(self, idx):
-        name = self.samples[idx]
+        xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
+        if os.path.exists(xml_path):
+            bbox_xyxy = self._load_xml_bbox(xml_path)
 
-        img_path = os.path.join(self.images_dir, name + ".jpg")
-        mask_path = os.path.join(self.masks_dir, name + ".png")
-
-        # LOAD IMAGE
-        image = mpimg.imread(img_path).astype(np.float32)
-
-        # Remove alpha channel (RGBA → RGB)
-        if len(image.shape) == 3 and image.shape[2] == 4:
-            image = image[:, :, :3]
 
         if image.max() > 1:
            image = image / 255.0
