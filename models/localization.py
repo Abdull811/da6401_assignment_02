@@ -21,35 +21,29 @@ from models.vgg11 import VGG11Encoder
 class VGG11Localizer(nn.Module):
     """VGG11-based localizer."""
 
-    def __init__(
-        self,
-        in_channels: int = 3,
-        dropout_p: float = 0.5,
-        use_batchnorm: bool = True,
-    ):
+    def __init__(self, in_channels: int = 3, dropout_p: float = 0.5, use_batchnorm: bool = True):
         """
         Initialize the VGG11Localizer model.
 
         Args:
             in_channels: Number of input channels.
             dropout_p: Dropout probability for the localization head.
-            use_batchnorm: Kept for compatibility with older training scripts.
         """
         
         super().__init__()
         # Extract features from image
         self.image_size = 224.0
-        self.encoder = VGG11Encoder(in_channels=in_channels)
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.encoder = VGG11Encoder(in_channels=in_channels, use_batchnorm=use_batchnorm)
         self.head = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(512, 256),
+
+            nn.Linear(512 * 7 * 7, 2048),
             nn.ReLU(inplace=True),
-            CustomDropout(dropout_p),
-            nn.Linear(256, 128),
+
+            nn.Linear(2048, 512),
             nn.ReLU(inplace=True),
-            CustomDropout(dropout_p),
-            nn.Linear(128, 4),
+            
+            nn.Linear(512, 4),
         )
         
 
@@ -63,7 +57,6 @@ class VGG11Localizer(nn.Module):
         """
         
         x = self.encoder(x)
-        x = self.pool(x)
         raw_box = self.head(x)
 
         # Keep predictions in image-space [cx, cy, w, h], matching the grader.
