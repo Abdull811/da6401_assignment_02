@@ -103,6 +103,9 @@ class OxfordIIITPetDataset(Dataset):
         if len(image.shape) == 3 and image.shape[2] == 4:
             image = image[:, :, :3]
 
+        if image.max() > 1:
+           image = image / 255.0
+        
         # LOAD MASK
         mask = mpimg.imread(mask_path)
 
