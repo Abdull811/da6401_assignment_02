@@ -12,9 +12,11 @@ import wandb
 from sklearn.metrics import f1_score
 from torch.utils.data import DataLoader
 
-PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+
+os.environ["WANDB_API_KEY"] = "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"
 
 from data.pets_dataset import OxfordIIITPetDataset
 from losses.iou_loss import IoULoss
@@ -25,10 +27,10 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 35
-LOCALIZER_EPOCHS = 25
-SEGMENTER_EPOCHS = 30
-CLASSIFIER_LR = 3e-4
+CLASSIFIER_EPOCHS = 50
+LOCALIZER_EPOCHS = 20
+SEGMENTER_EPOCHS = 20
+CLASSIFIER_LR = 1e-4
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -78,25 +80,18 @@ def draw_box(img: np.ndarray, box, color) -> np.ndarray:
 def dice_score(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     pred = torch.argmax(logits, dim=1)
     score = 0.0
-    valid_classes = 0
     for cls in range(1, 3):
         pred_c = (pred == cls).float()
         target_c = (target == cls).float()
         inter = (pred_c * target_c).sum()
         union = pred_c.sum() + target_c.sum()
-        if target_c.sum() > 0 or pred_c.sum() > 0:
-            score += (2 * inter + 1e-6) / (union + 1e-6)
-            valid_classes += 1
-    if valid_classes == 0:
-        return torch.tensor(1.0, device=logits.device)
-    return score / valid_classes
+        score += (2 * inter + 1e-6) / (union + 1e-6)
+    return score / 2.0
 
 
 def dice_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     probs = torch.softmax(logits, dim=1)
     target_one_hot = torch.nn.functional.one_hot(target, num_classes=3).permute(0, 3, 1, 2).float()
-    probs = probs[:, 1:]
-    target_one_hot = target_one_hot[:, 1:]
     inter = (probs * target_one_hot).sum(dim=(2, 3))
     union = probs.sum(dim=(2, 3)) + target_one_hot.sum(dim=(2, 3))
     dice = (2 * inter + 1e-6) / (union + 1e-6)
@@ -163,14 +158,12 @@ def load_checkpoint_into_model(model: nn.Module, filename: str) -> float:
     raise FileNotFoundError(f"Checkpoint not found for {filename}")
 
 
-def checkpoint_exists(filename: str) -> bool:
-    return Path(filename).exists() or (Path("checkpoints") / filename).exists()
-
-
 def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: torch.Tensor) -> dict:
     with torch.no_grad():
-        first_layer = classifier.encoder.conv1(images)[0].mean(dim=0).detach().cpu().numpy()
-        bottleneck = segmenter.encoder(images)[0].mean(dim=0).detach().cpu().numpy()
+        x = images
+        first_layer = classifier.encoder.conv1(x)[0].mean(dim=0).detach().cpu().numpy()
+        bottleneck = segmenter.encoder(x)[0].mean(dim=0).detach().cpu().numpy()
+
     first_layer = ((first_layer - first_layer.min()) / (first_layer.max() - first_layer.min() + 1e-6) * 255).astype(np.uint8)
     bottleneck = ((bottleneck - bottleneck.min()) / (bottleneck.max() - bottleneck.min() + 1e-6) * 255).astype(np.uint8)
     return {
@@ -178,11 +171,45 @@ def log_feature_maps(classifier: VGG11Classifier, segmenter: VGG11UNet, images: 
         "last_layer_feature": wandb.Image(bottleneck),
     }
 
+def log_comparison_plots():
+    import matplotlib.pyplot as plt
+    api = wandb.Api()
+    runs = api.runs("ge26z811-zan/da6401_assignment_02")
+
+    # Classification Loss Comparison
+    plt.figure()
+    for run in runs:
+        hist = run.history(keys=["cls_train_loss"])
+        if "cls_train_loss" in hist:
+            plt.plot(hist["cls_train_loss"], label=run.name)
+    plt.legend()
+    plt.title("Classification Loss Comparison")
+    wandb.log({"comparison_cls_loss": wandb.Image(plt)})
+    plt.close()
+
+    # Dice Comparison
+    plt.figure()
+    for run in runs:
+        hist = run.history(keys=["val_dice"])
+        if "val_dice" in hist:
+            plt.plot(hist["val_dice"], label=run.name)
+    plt.legend()
+    plt.title("Dice Score Comparison")
+    wandb.log({"comparison_dice": wandb.Image(plt)})
+    plt.close()
 
 def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loader: DataLoader) -> float:
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    optimizer = optim.Adam(model.parameters(), lr=CLASSIFIER_LR, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[18, 28], gamma=0.2)
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=CLASSIFIER_LR,
+        weight_decay=5e-4
+    )
+    scheduler = optim.lr_scheduler.MultiStepLR(
+        optimizer,
+        milestones=[20, 35, 45],
+        gamma=0.1,
+    )
     best_f1 = -1.0
 
     for epoch in range(1, CLASSIFIER_EPOCHS + 1):
@@ -199,19 +226,21 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
             logits = model(images)
             loss = criterion(logits, labels)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
             train_loss += loss.item()
             train_correct += (torch.argmax(logits, dim=1) == labels).sum().item()
             train_total += labels.numel()
+            if step == 1 or step % 20 == 0:
+                print(f"[CLS] Epoch {epoch:02d} Step {step:03d} | Loss {loss.item():.4f}")
 
         model.eval()
         pred_labels = []
         true_labels = []
+        conv3_hist = None
         val_correct = 0
         val_total = 0
-        conv3_hist = None
 
         with torch.no_grad():
             for batch_idx, (images, labels, _, _) in enumerate(val_loader):
@@ -248,9 +277,9 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
                 "val_cls_acc": val_acc,
                 "cls_lr": optimizer.param_groups[0]["lr"],
                 "conv3_activation": conv3_hist,
+                "bn_mode": "with_bn" if hasattr(model.encoder, "bn1") else "no_bn"
             }
         )
-
         print(
             f"[CLS] Epoch {epoch:02d} | "
             f"TrainAcc {train_acc:.4f} | ValAcc {val_acc:.4f} | Macro-F1 {macro_f1:.4f}"
@@ -270,8 +299,8 @@ def train_localizer(
     train_loader: DataLoader,
     val_loader: DataLoader,
 ) -> float:
-    model.encoder.load_state_dict(encoder_state, strict=True)
-    criterion_reg = nn.SmoothL1Loss(beta=2.0)
+    model.encoder.load_state_dict(encoder_state, strict=False)
+    criterion_reg = nn.SmoothL1Loss(beta=5.0)
     criterion_iou = IoULoss()
     optimizer = optim.Adam(model.parameters(), lr=LOCALIZER_LR, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
@@ -287,11 +316,14 @@ def train_localizer(
 
             optimizer.zero_grad()
             pred_boxes = model(images)
-            loss = 0.25 * criterion_reg(pred_boxes, boxes) + 1.0 * criterion_iou(pred_boxes, boxes)
+            loss = 0.5 * criterion_reg(pred_boxes, boxes) + criterion_iou(pred_boxes, boxes)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
+
             train_loss += loss.item()
+            if step == 1 or step % 20 == 0:
+                print(f"[LOC] Epoch {epoch:02d} Step {step:03d} | Loss {loss.item():.4f}")
 
         model.eval()
         ious = []
@@ -329,14 +361,23 @@ def train_localizer(
                 "IoU_table": bbox_table,
             }
         )
-
         print(f"[LOC] Epoch {epoch:02d} | Mean-IoU {mean_iou:.4f}")
 
-        if mean_iou > best_iou:
+        if mean_iou >= best_iou:
             best_iou = mean_iou
             save_checkpoint(model, "localizer.pth", epoch, best_iou)
 
     return best_iou
+
+
+def set_segmentation_freeze_mode(segmenter: VGG11UNet, freeze_mode: str) -> None:
+    if freeze_mode == "freeze":
+        for param in segmenter.encoder.parameters():
+            param.requires_grad = False
+    elif freeze_mode == "partial":
+        params = list(segmenter.encoder.parameters())
+        for param in params[: len(params) // 2]:
+            param.requires_grad = False
 
 
 def train_segmenter(
@@ -345,10 +386,12 @@ def train_segmenter(
     encoder_state,
     train_loader: DataLoader,
     val_loader: DataLoader,
+    freeze_mode: str,
 ) -> float:
-    model.encoder.load_state_dict(encoder_state, strict=True)
-    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([0.05, 1.0, 2.0], device=DEVICE))
-    optimizer = optim.Adam(model.parameters(), lr=SEGMENTER_LR, weight_decay=1e-5)
+    model.encoder.load_state_dict(encoder_state, strict=False)
+    set_segmentation_freeze_mode(model, freeze_mode)
+    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([0.1, 1.0, 2.0], device=DEVICE))
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=SEGMENTER_LR, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
     best_dice = -1.0
 
@@ -362,11 +405,14 @@ def train_segmenter(
 
             optimizer.zero_grad()
             logits = model(images)
-            loss = criterion_ce(logits, masks) + 1.5 * dice_loss(logits, masks)
+            loss = criterion_ce(logits, masks) + dice_loss(logits, masks)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
+
             train_loss += loss.item()
+            if step == 1 or step % 20 == 0:
+                print(f"[SEG] Epoch {epoch:02d} Step {step:03d} | Loss {loss.item():.4f}")
 
         model.eval()
         dice_values = []
@@ -391,6 +437,10 @@ def train_segmenter(
                         "pred_mask": wandb.Image(colorize_mask(pred_masks[0].detach().cpu().numpy())),
                     }
                     visual_log.update(log_feature_maps(classifier, model, images))
+                    for idx in range(min(5, images.shape[0])):
+                        visual_log[f"seg_sample_{idx}_input"] = wandb.Image((denormalize(images[idx]) * 255).astype(np.uint8))
+                        visual_log[f"seg_sample_{idx}_gt"] = wandb.Image(colorize_mask(masks[idx].detach().cpu().numpy()))
+                        visual_log[f"seg_sample_{idx}_pred"] = wandb.Image(colorize_mask(pred_masks[idx].detach().cpu().numpy()))
 
         mean_dice = float(np.mean(dice_values)) if dice_values else 0.0
         mean_pixel_acc = float(np.mean(pixel_values)) if pixel_values else 0.0
@@ -405,10 +455,9 @@ def train_segmenter(
                 **visual_log,
             }
         )
-
         print(f"[SEG] Epoch {epoch:02d} | Dice {mean_dice:.4f} | PixelAcc {mean_pixel_acc:.4f}")
 
-        if mean_dice > best_dice:
+        if mean_dice >= best_dice:
             best_dice = mean_dice
             save_checkpoint(model, "unet.pth", epoch, best_dice)
 
@@ -420,12 +469,11 @@ def train(
     freeze_mode: str = "full",
     wandb_mode: str = "online",
     use_batchnorm: bool = True,
-    reuse_classifier_checkpoint: bool = True,
 ) -> None:
     set_seed()
     wandb.init(
         project="da6401_assignment_02",
-        name=f"dropout_{dropout_p}",
+        name=f"dropout_{dropout_p}_{freeze_mode}",
         config={
             "dropout": dropout_p,
             "freeze_mode": freeze_mode,
@@ -442,27 +490,35 @@ def train(
     task_train_loader, task_val_loader = build_loaders(crop_for_classification=False)
 
     classifier = VGG11Classifier(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
-    if reuse_classifier_checkpoint and checkpoint_exists("classifier.pth"):
-        best_cls_f1 = load_checkpoint_into_model(classifier, "classifier.pth")
-        print(f"[CLS] Reusing saved classifier checkpoint with best metric {best_cls_f1:.4f}")
-    else:
-        best_cls_f1 = train_classifier(classifier, cls_train_loader, cls_val_loader)
-        load_checkpoint_into_model(classifier, "classifier.pth")
-        print(f"[CLS] Best saved Macro-F1: {best_cls_f1:.4f}")
-
+    best_cls_f1 = train_classifier(classifier, cls_train_loader, cls_val_loader)
+    load_checkpoint_into_model(classifier, "classifier.pth")
     encoder_state = classifier.encoder.state_dict()
+    print(f"[CLS] Best saved Macro-F1: {best_cls_f1:.4f}")
 
     localizer = VGG11Localizer(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
     best_loc_iou = train_localizer(localizer, classifier, encoder_state, task_train_loader, task_val_loader)
 
     segmenter = VGG11UNet(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
-    best_seg_dice = train_segmenter(classifier, segmenter, encoder_state, task_train_loader, task_val_loader)
+    best_seg_dice = train_segmenter(classifier, segmenter, encoder_state, task_train_loader, task_val_loader, freeze_mode)
 
     wandb.summary["best_cls_macro_f1"] = best_cls_f1
     wandb.summary["best_loc_iou"] = best_loc_iou
     wandb.summary["best_seg_dice"] = best_seg_dice
+    log_comparison_plots()
     wandb.finish()
 
 
+def run_report_experiments(wandb_mode: str = "online") -> None:
+    for use_batchnorm in [False, True]:
+        train(dropout_p=0.2, freeze_mode="full", wandb_mode=wandb_mode, use_batchnorm=use_batchnorm)
+
+    for dropout_p in [0.0, 0.2, 0.5]:
+        train(dropout_p=dropout_p, freeze_mode="full", wandb_mode=wandb_mode, use_batchnorm=True)
+
+    for freeze_mode in ["freeze", "partial", "full"]:
+        train(dropout_p=0.2, freeze_mode=freeze_mode, wandb_mode=wandb_mode, use_batchnorm=True)
+
+
 if __name__ == "__main__":
-    train(dropout_p=0.2, freeze_mode="full", wandb_mode="online", use_batchnorm=True, reuse_classifier_checkpoint=True)
+    train(dropout_p=0.2, freeze_mode="full", wandb_mode="online") 
+    #run_report_experiments()
