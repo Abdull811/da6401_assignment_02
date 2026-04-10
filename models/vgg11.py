@@ -11,17 +11,17 @@ class VGG11Encoder(nn.Module):
     """VGG11-style encoder with optional intermediate feature returns.
     """
 
-    def __init__(self, in_channels: int = 3):
+    def __init__(self, in_channels: int = 3, use_batchnorm: bool = True):
         """Initialize the VGG11Encoder model."""
         super().__init__()
 
         # Helper block: Conv + BN + ReLU
         def block(in_c, out_c):
-            return nn.Sequential(
-                nn.Conv2d(in_c, out_c, kernel_size=3, padding=1),
-                nn.BatchNorm2d(out_c),
-                nn.ReLU(inplace=True)
-            )
+            layers = [nn.Conv2d(in_c, out_c, kernel_size=3, padding=1)]
+            if use_batchnorm:
+                layers.append(nn.BatchNorm2d(out_c))
+            layers.append(nn.ReLU(inplace=True))
+            return nn.Sequential(*layers)
 
         # VGG11 Structure
         self.conv1 = block(in_channels, 64)
