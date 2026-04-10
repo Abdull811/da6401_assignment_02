@@ -21,13 +21,19 @@ from models.vgg11 import VGG11Encoder
 class VGG11Localizer(nn.Module):
     """VGG11-based localizer."""
 
-    def __init__(self, in_channels: int = 3, dropout_p: float = 0.5):
+    def __init__(
+        self,
+        in_channels: int = 3,
+        dropout_p: float = 0.5,
+        use_batchnorm: bool = True,
+    ):
         """
         Initialize the VGG11Localizer model.
 
         Args:
             in_channels: Number of input channels.
             dropout_p: Dropout probability for the localization head.
+            use_batchnorm: Kept for compatibility with older training scripts.
         """
         
         super().__init__()
