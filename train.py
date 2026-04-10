@@ -80,13 +80,14 @@ def draw_box(img: np.ndarray, box, color) -> np.ndarray:
 def dice_score(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     pred = torch.argmax(logits, dim=1)
     score = 0.0
-    for cls in range(1, 3):
+    num_classes = logits.shape[1]
+    for cls in range(num_classes):
         pred_c = (pred == cls).float()
         target_c = (target == cls).float()
         inter = (pred_c * target_c).sum()
         union = pred_c.sum() + target_c.sum()
         score += (2 * inter + 1e-6) / (union + 1e-6)
-    return score / 2.0
+    return score / num_classes
 
 
 def dice_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -390,7 +391,7 @@ def train_segmenter(
 ) -> float:
     model.encoder.load_state_dict(encoder_state, strict=False)
     set_segmentation_freeze_mode(model, freeze_mode)
-    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([0.1, 1.0, 2.0], device=DEVICE))
+    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([1.0, 0.1, 2.0], device=DEVICE))
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=SEGMENTER_LR, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
     best_dice = -1.0
