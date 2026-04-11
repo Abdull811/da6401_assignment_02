@@ -136,7 +136,6 @@ class OxfordIIITPetDataset(Dataset):
         # 1=foreground, 2=background, 3=boundary -> 0,1,2
         mask = np.clip(mask.astype(np.int64) - 1, 0, 2)
 
-        
         xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
         if os.path.exists(xml_path):
             bbox_xyxy = self._load_xml_bbox(xml_path)
@@ -152,7 +151,7 @@ class OxfordIIITPetDataset(Dataset):
                     float(ys_raw.max()),
                 ]
 
-        if self.crop_for_classification:
+                if self.crop_for_classification:
             x1_box, y1_box, x2_box, y2_box = bbox_xyxy
 
             box_w = x2_box - x1_box + 1.0
@@ -181,3 +180,26 @@ class OxfordIIITPetDataset(Dataset):
             bbox = torch.tensor([112.0, 112.0, 50.0, 50.0], dtype=torch.float32)
             return image, label, bbox, mask
 
+        augmented = self.task_transform(
+            image=image,
+            mask=mask,
+            bboxes=[bbox_xyxy],
+            bbox_labels=[0],
+        )
+
+        image = torch.tensor(augmented["image"]).permute(2, 0, 1)
+        mask = torch.tensor(augmented["mask"]).long()
+        label = torch.tensor(self.labels[name]).long()
+
+        x1, y1, x2, y2 = augmented["bboxes"][0]
+        bbox = torch.tensor(
+            [
+                (x1 + x2) / 2.0,
+                (y1 + y2) / 2.0,
+                max(x2 - x1, 1.0),
+                max(y2 - y1, 1.0),
+            ],
+            dtype=torch.float32,
+        )
+
+        return image, label, bbox, mask
