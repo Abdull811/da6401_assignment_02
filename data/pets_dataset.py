@@ -151,7 +151,28 @@ class OxfordIIITPetDataset(Dataset):
                     float(ys_raw.max()),
                 ]
 
-        if self.crop_for_classification:
+                if self.crop_for_classification:
+            x1_box, y1_box, x2_box, y2_box = bbox_xyxy
+
+            box_w = x2_box - x1_box + 1.0
+            box_h = y2_box - y1_box + 1.0
+            side = int(max(box_w, box_h) * (1.0 + self.crop_margin))
+            side = max(side, 32)
+
+            cx = int((x1_box + x2_box) / 2.0)
+            cy = int((y1_box + y2_box) / 2.0)
+
+            x1_crop = max(0, cx - side // 2)
+            y1_crop = max(0, cy - side // 2)
+            x2_crop = min(image.shape[1] - 1, x1_crop + side - 1)
+            y2_crop = min(image.shape[0] - 1, y1_crop + side - 1)
+
+            x1_crop = max(0, x2_crop - side + 1)
+            y1_crop = max(0, y2_crop - side + 1)
+
+            image = image[y1_crop:y2_crop + 1, x1_crop:x2_crop + 1]
+            mask = mask[y1_crop:y2_crop + 1, x1_crop:x2_crop + 1]
+
             augmented = self.image_transform(image=image, mask=mask)
             image = torch.tensor(augmented["image"]).permute(2, 0, 1)
             mask = torch.tensor(augmented["mask"]).long()
