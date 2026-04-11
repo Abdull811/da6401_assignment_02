@@ -27,7 +27,7 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 50
+CLASSIFIER_EPOCHS = 20
 LOCALIZER_EPOCHS = 20
 SEGMENTER_EPOCHS = 20
 CLASSIFIER_LR = 1e-4
