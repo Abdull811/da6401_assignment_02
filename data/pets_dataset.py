@@ -151,7 +151,7 @@ class OxfordIIITPetDataset(Dataset):
                     float(ys_raw.max()),
                 ]
 
-            if self.crop_for_classification:
+        if self.crop_for_classification:
             x1_box, y1_box, x2_box, y2_box = bbox_xyxy
 
             box_w = x2_box - x1_box + 1.0
