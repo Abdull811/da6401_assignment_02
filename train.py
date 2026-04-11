@@ -27,10 +27,10 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 20
+CLASSIFIER_EPOCHS = 50
 LOCALIZER_EPOCHS = 40
 SEGMENTER_EPOCHS = 30
-CLASSIFIER_LR = 3e-4
+CLASSIFIER_LR = 1e-4
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -56,8 +56,8 @@ def denormalize(img: torch.Tensor) -> np.ndarray:
 
 def colorize_mask(mask: np.ndarray) -> np.ndarray:
     colored = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
-    colored[mask == 0] = [0, 0, 0]
-    colored[mask == 1] = [0, 255, 0]
+    colored[mask == 0] = [0, 255, 0]
+    colored[mask == 1] = [0, 0, 0]
     colored[mask == 2] = [255, 0, 0]
     return colored
 
@@ -88,7 +88,7 @@ def dice_score(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         union = pred_c.sum() + target_c.sum()
         score += (2 * inter + 1e-6) / (union + 1e-6)
     return score / num_classes
-
+    
 
 def dice_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     probs = torch.softmax(logits, dim=1)
@@ -204,7 +204,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
     optimizer = optim.Adam(
         model.parameters(),
         lr=CLASSIFIER_LR,
-        weight_decay=1e-3
+        weight_decay=5e-4
     )
     scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
