@@ -138,16 +138,17 @@ class OxfordIIITPetDataset(Dataset):
         mask = np.clip(mask.astype(np.int64) - 1, 0, 2)
 
         # LOAD XML HEAD BOX
-        xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
+                xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
         if os.path.exists(xml_path):
-            root = ET.parse(xml_path).getroot()
-            box = root.find("object").find("bndbox")
-            bbox_xyxy = [
-                float(box.find("xmin").text) - 1.0,
-                float(box.find("ymin").text) - 1.0,
-                float(box.find("xmax").text) - 1.0,
-                float(box.find("ymax").text) - 1.0,
-            ]
+            with open(xml_path, "r", encoding="utf-8") as f:
+                xml_text = f.read()
+
+            xmin = float(xml_text.split("<xmin>")[1].split("</xmin>")[0]) - 1.0
+            ymin = float(xml_text.split("<ymin>")[1].split("</ymin>")[0]) - 1.0
+            xmax = float(xml_text.split("<xmax>")[1].split("</xmax>")[0]) - 1.0
+            ymax = float(xml_text.split("<ymax>")[1].split("</ymax>")[0]) - 1.0
+
+            bbox_xyxy = [xmin, ymin, xmax, ymax]
         else:
             ys_raw, xs_raw = np.where(mask == 0)
             if len(xs_raw) == 0 or len(ys_raw) == 0:
