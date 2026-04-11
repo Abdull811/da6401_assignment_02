@@ -278,7 +278,8 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
                 "val_cls_acc": val_acc,
                 "cls_lr": optimizer.param_groups[0]["lr"],
                 "conv3_activation": conv3_hist,
-                "bn_mode": "with_bn" if use_batchnorm else "no_bn"}
+                "bn_mode": "tracked_in_config",
+                }
         )
         print(
             f"[CLS] Epoch {epoch:02d} | "
