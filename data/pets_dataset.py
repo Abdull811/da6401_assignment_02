@@ -1,18 +1,19 @@
 """Dataset loader for Oxford-IIIT Pet"""
 
 import os
-import torch
-import numpy as np
-from torch.utils.data import Dataset
-import matplotlib.image as mpimg
+
 import albumentations as A
+import matplotlib.image as mpimg
+import numpy as np
+import torch
+from torch.utils.data import Dataset
 
 
 class OxfordIIITPetDataset(Dataset):
     """
     Multi-task dataset:
     - classification (breed)
-    - localization (dummy bbox)
+    - localization (head bbox)
     - segmentation (trimap)
     """
 
@@ -22,7 +23,6 @@ class OxfordIIITPetDataset(Dataset):
         self.crop_for_classification = crop_for_classification
         self.crop_margin = crop_margin
 
-        # PATHS
         self.images_dir = os.path.join(root, "images")
         self.masks_dir = os.path.join(root, "annotations", "trimaps")
 
@@ -33,7 +33,6 @@ class OxfordIIITPetDataset(Dataset):
         else:
             raise ValueError("split must be 'train' or 'val'")
 
-        # TRANSFORM
         transforms = [A.Resize(224, 224)]
         if split == "train":
             if crop_for_classification:
@@ -41,8 +40,6 @@ class OxfordIIITPetDataset(Dataset):
                     [
                         A.HorizontalFlip(p=0.5),
                         A.RandomBrightnessContrast(p=0.25),
-                        # A.HorizontalFlip(p=0.5),
-                        # A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
                         A.Affine(
                             translate_percent=(-0.03, 0.03),
                             scale=(0.92, 1.08),
@@ -59,6 +56,7 @@ class OxfordIIITPetDataset(Dataset):
                         A.RandomBrightnessContrast(p=0.3),
                     ]
                 )
+
         transforms.append(
             A.Normalize(
                 mean=(0.485, 0.456, 0.406),
@@ -66,6 +64,7 @@ class OxfordIIITPetDataset(Dataset):
                 max_pixel_value=1.0,
             )
         )
+
         self.image_transform = A.Compose(transforms)
         self.task_transform = A.Compose(
             transforms,
@@ -75,28 +74,27 @@ class OxfordIIITPetDataset(Dataset):
         self.samples = []
         self.labels = {}
 
-        # LOAD SPLIT
         with open(self.split_file, "r") as f:
             for line in f:
                 parts = line.strip().split()
-
                 name = parts[0]
-                label = int(parts[1]) - 1  # 0-based
-
+                label = int(parts[1]) - 1
                 self.samples.append(name)
                 self.labels[name] = label
 
-                
     def __len__(self):
         return len(self.samples)
 
-        def _read_tag_value(self, text: str, tag: str) -> float:
+    def _read_tag_value(self, text: str, tag: str) -> float:
         start_token = f"<{tag}>"
         end_token = f"</{tag}>"
+
         start = text.find(start_token)
         end = text.find(end_token)
+
         if start == -1 or end == -1:
-            raise ValueError(f"Tag {tag} not found")
+            raise ValueError(f"Tag {tag} not found in XML")
+
         start += len(start_token)
         return float(text[start:end].strip())
 
@@ -112,43 +110,35 @@ class OxfordIIITPetDataset(Dataset):
         return [xmin, ymin, xmax, ymax]
 
     def __getitem__(self, idx):
-        xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
-        if os.path.exists(xml_path):
-            bbox_xyxy = self._load_xml_bbox(xml_path)
+        name = self.samples[idx]
 
+        img_path = os.path.join(self.images_dir, name + ".jpg")
+        mask_path = os.path.join(self.masks_dir, name + ".png")
+
+        image = mpimg.imread(img_path).astype(np.float32)
+
+        if image.ndim == 3 and image.shape[2] == 4:
+            image = image[:, :, :3]
 
         if image.max() > 1:
-           image = image / 255.0
-        
-        # LOAD MASK
+            image = image / 255.0
+
         mask = mpimg.imread(mask_path)
 
-        if len(mask.shape) == 3:
+        if mask.ndim == 3:
             mask = mask[:, :, 0]
 
         if mask.max() <= 1.0:
-            # mpimg reads the trimap PNG as floats {1/255, 2/255, 3/255}
             mask = np.round(mask * 255).astype(np.uint8)
         else:
             mask = np.round(mask).astype(np.uint8)
 
-        # Oxford-IIIT Pet trimap:
-        # 1 = foreground, 2 = background, 3 = boundary
-        # Remap to contiguous class ids for CE loss
+        # 1=foreground, 2=background, 3=boundary -> 0,1,2
         mask = np.clip(mask.astype(np.int64) - 1, 0, 2)
 
-        # LOAD XML HEAD BOX
-                xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
+        xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
         if os.path.exists(xml_path):
-            with open(xml_path, "r", encoding="utf-8") as f:
-                xml_text = f.read()
-
-            xmin = float(xml_text.split("<xmin>")[1].split("</xmin>")[0]) - 1.0
-            ymin = float(xml_text.split("<ymin>")[1].split("</ymin>")[0]) - 1.0
-            xmax = float(xml_text.split("<xmax>")[1].split("</xmax>")[0]) - 1.0
-            ymax = float(xml_text.split("<ymax>")[1].split("</ymax>")[0]) - 1.0
-
-            bbox_xyxy = [xmin, ymin, xmax, ymax]
+            bbox_xyxy = self._load_xml_bbox(xml_path)
         else:
             ys_raw, xs_raw = np.where(mask == 0)
             if len(xs_raw) == 0 or len(ys_raw) == 0:
@@ -192,4 +182,3 @@ class OxfordIIITPetDataset(Dataset):
         )
 
         return image, label, bbox, mask
-    
