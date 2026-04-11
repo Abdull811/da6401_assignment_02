@@ -27,9 +27,9 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 50
-LOCALIZER_EPOCHS = 40
-SEGMENTER_EPOCHS = 30
+CLASSIFIER_EPOCHS = 5
+LOCALIZER_EPOCHS = 5
+SEGMENTER_EPOCHS = 5
 CLASSIFIER_LR = 1e-4
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
@@ -56,8 +56,8 @@ def denormalize(img: torch.Tensor) -> np.ndarray:
 
 def colorize_mask(mask: np.ndarray) -> np.ndarray:
     colored = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
-    colored[mask == 0] = [0, 255, 0]
-    colored[mask == 1] = [0, 0, 0]
+    colored[mask == 0] = [0, 0, 0]
+    colored[mask == 1] = [0, 255, 0]
     colored[mask == 2] = [255, 0, 0]
     return colored
 
@@ -317,7 +317,7 @@ def train_localizer(
 
             optimizer.zero_grad()
             pred_boxes = model(images)
-            loss = criterion_iou(pred_boxes, boxes) + 0.1 * criterion_reg(pred_boxes, boxes)
+            loss = 2.0 * criterion_reg(pred_boxes, boxes) + criterion_iou(pred_boxes, boxes)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
@@ -391,7 +391,7 @@ def train_segmenter(
 ) -> float:
     model.encoder.load_state_dict(encoder_state, strict=False)
     set_segmentation_freeze_mode(model, freeze_mode)
-    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([1.0, 0.1, 2.0], device=DEVICE))
+    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([0.05, 1.0, 2.0], device=DEVICE))
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=SEGMENTER_LR, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
     best_dice = -1.0
@@ -406,7 +406,7 @@ def train_segmenter(
 
             optimizer.zero_grad()
             logits = model(images)
-            loss = criterion_ce(logits, masks) + dice_loss(logits, masks)
+            loss = 0.5 * criterion_ce(logits, masks) + 1.5 * dice_loss(logits, masks)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
