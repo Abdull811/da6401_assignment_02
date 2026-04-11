@@ -391,7 +391,7 @@ def train_segmenter(
 ) -> float:
     model.encoder.load_state_dict(encoder_state, strict=False)
     set_segmentation_freeze_mode(model, freeze_mode)
-    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([0.05, 1.0, 2.0], device=DEVICE))
+    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([0.2, 1.0, 1.5], device=DEVICE))
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=SEGMENTER_LR, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
     best_dice = -1.0
@@ -487,7 +487,7 @@ def train(
         mode=wandb_mode,
     )
 
-    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=True)
+    cls_train_loader, cls_val_loader = build_loaders(crop_for_classification=False)
     task_train_loader, task_val_loader = build_loaders(crop_for_classification=False)
 
     classifier = VGG11Classifier(dropout_p=dropout_p, use_batchnorm=use_batchnorm).to(DEVICE)
@@ -521,5 +521,5 @@ def run_report_experiments(wandb_mode: str = "online") -> None:
 
 
 if __name__ == "__main__":
-    train(dropout_p=0.2, freeze_mode="full", wandb_mode="online", use_batchnorm=True) 
+    train(dropout_p=0.2, freeze_mode="partial", wandb_mode="online", use_batchnorm=True) 
     #run_report_experiments()
