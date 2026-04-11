@@ -27,10 +27,10 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 30
-LOCALIZER_EPOCHS = 30
+CLASSIFIER_EPOCHS = 20
+LOCALIZER_EPOCHS = 40
 SEGMENTER_EPOCHS = 30
-CLASSIFIER_LR = 1e-4
+CLASSIFIER_LR = 3e-4
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
 NUM_WORKERS = 0
@@ -204,7 +204,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
     optimizer = optim.Adam(
         model.parameters(),
         lr=CLASSIFIER_LR,
-        weight_decay=5e-4
+        weight_decay=1e-3
     )
     scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer,
@@ -278,8 +278,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
                 "val_cls_acc": val_acc,
                 "cls_lr": optimizer.param_groups[0]["lr"],
                 "conv3_activation": conv3_hist,
-                "bn_mode": "with_bn" if hasattr(model.encoder, "bn1") else "no_bn"
-            }
+                "bn_mode": "with_bn" if use_batchnorm else "no_bn"}
         )
         print(
             f"[CLS] Epoch {epoch:02d} | "
@@ -521,5 +520,5 @@ def run_report_experiments(wandb_mode: str = "online") -> None:
 
 
 if __name__ == "__main__":
-    train(dropout_p=0.2, freeze_mode="full", wandb_mode="online") 
+    train(dropout_p=0.2, freeze_mode="full", wandb_mode="online", use_batchnorm=True) 
     #run_report_experiments()
