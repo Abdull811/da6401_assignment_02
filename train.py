@@ -81,7 +81,7 @@ def dice_score(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     pred = torch.argmax(logits, dim=1)
     score = 0.0
     num_classes = logits.shape[1]
-    for cls in range(1, 3):
+    for cls in range(1, num_classes):
         pred_c = (pred == cls).float()
         target_c = (target == cls).float()
         inter = (pred_c * target_c).sum()
@@ -301,7 +301,7 @@ def train_localizer(
     val_loader: DataLoader,
 ) -> float:
     model.encoder.load_state_dict(encoder_state, strict=False)
-    criterion_reg = nn.SmoothL1Loss(beta=5.0)
+    criterion_reg = nn.SmoothL1Loss(beta=1.0)
     criterion_iou = IoULoss()
     optimizer = optim.Adam(model.parameters(), lr=LOCALIZER_LR, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=4, min_lr=1e-6)
