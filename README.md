@@ -12,6 +12,7 @@ The system uses a **VGG11-based architecture** with task-specific heads and incl
 
 ## Repository
 * GitHub Repository: [https://github.com/Abdull811/da6401_assignment_02.git]
+* Weights & Biases Report Link: []
 * Weights & Biases Run Link: View Run on W&B: [https://wandb.ai/ge26z811-zan/da6401_Assigment_02_Weight_&_Biase?nw=nwuserge26z811]
 
 ---
