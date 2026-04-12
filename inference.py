@@ -68,6 +68,15 @@ def preprocess_image(path: str) -> tuple[np.ndarray, torch.Tensor]:
     tensor = torch.tensor(image_norm).permute(2, 0, 1).unsqueeze(0)
     return image, tensor
 
+def load_model():
+    model = MultiTaskPerceptionModel()
+
+    # LOAD TRAINED WEIGHTS 
+    checkpoint = torch.load("checkpoints/unet.pth", map_location="cpu")
+    model.load_state_dict(checkpoint["state_dict"], strict=False)
+
+    model.eval()
+    return model
 
 def predict_image(model: MultiTaskPerceptionModel, image_path: str) -> dict:
     image_raw, image_tensor = preprocess_image(image_path)
@@ -89,27 +98,27 @@ def predict_image(model: MultiTaskPerceptionModel, image_path: str) -> dict:
         "image": image_resized,
         "boxed": boxed,
         "mask": pred_mask,
-        "label": pred_label,
+        "label": f"class_{pred_label}",
         "confidence": pred_conf,
         "path": image_path,
     }
 
 
 def run_showcase(image_paths, project: str = "da6401_assignment_02_showcase", run_name: str = "novel_images") -> None:
-    model = MultiTaskPerceptionModel()
+    model = load_model()
     
     wandb.init(project=project, name=run_name, mode="online")
     table = wandb.Table(columns=["path", "label", "confidence", "image", "bbox", "mask"])
     for image_path in image_paths:
         pred = predict_image(model, image_path)
         table.add_data(
-            pred["path"],
-            pred["label"],
-            pred["confidence"],
-            wandb.Image(pred["image"]),
-            wandb.Image(pred["boxed"]),
-            wandb.Image(colorize_mask(pred["mask"])),
-        )
+        pred["path"],
+        pred["label"],
+        pred["confidence"],
+        wandb.Image(pred["image"], caption=f"Label: {pred['label']} | Conf: {pred['confidence']:.2f}"),
+        wandb.Image(pred["boxed"]),
+        wandb.Image(colorize_mask(pred["mask"])),
+    )
 
     wandb.log({"novel_image_showcase": table})
     wandb.finish()
@@ -117,5 +126,10 @@ def run_showcase(image_paths, project: str = "da6401_assignment_02_showcase", ru
 
 if __name__ == "__main__":
     default_image = Path("data/images/Abyssinian_1.jpg")
-    if default_image.exists():
-        run_showcase([str(default_image)], run_name="single_image_smoke_test")
+if __name__ == "__main__":
+    image_paths = [
+        "Abyssinian_1.jpg",   # 
+        "Abyssinian_2.jpg",
+        "Abyssinian_3.jpg"
+    ]
+    run_showcase(image_paths, run_name="final_showcase")
