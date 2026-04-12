@@ -61,7 +61,7 @@ class OxfordIIITPetDataset(Dataset):
             A.Normalize(
                 mean=(0.485, 0.456, 0.406),
                 std=(0.229, 0.224, 0.225),
-                max_pixel_value=1.0,
+                max_pixel_value=255.0,
             )
         )
 
@@ -124,8 +124,8 @@ class OxfordIIITPetDataset(Dataset):
         if image.ndim == 3 and image.shape[2] == 4:
             image = image[:, :, :3]
 
-        if image.max() > 1:
-            image = image / 255.0
+        #if image.max() > 1:
+        #    image = image / 255.0
 
         mask = mpimg.imread(mask_path)
 
@@ -182,7 +182,12 @@ class OxfordIIITPetDataset(Dataset):
             image = torch.tensor(augmented["image"]).permute(2, 0, 1)
             mask = torch.tensor(augmented["mask"]).long()
             label = torch.tensor(self.labels[name]).long()
-            bbox = torch.tensor([112.0, 112.0, 50.0, 50.0], dtype=torch.float32)
+            bbox = torch.tensor([
+                image.shape[2] / 2,
+                image.shape[1] / 2,
+                image.shape[2] * 0.5,
+                image.shape[1] * 0.5,
+            ], dtype=torch.float32)
             return image, label, bbox, mask
 
         augmented = self.task_transform(
