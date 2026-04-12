@@ -98,15 +98,19 @@ class OxfordIIITPetDataset(Dataset):
         start += len(start_token)
         return float(text[start:end].strip())
 
-    def _load_xml_bbox(self, xml_path: str):
-        with open(xml_path, "r", encoding="utf-8") as f:
-            text = f.read()
-
-        xmin = self._read_tag_value(text, "xmin") - 1.0
-        ymin = self._read_tag_value(text, "ymin") - 1.0
-        xmax = self._read_tag_value(text, "xmax") - 1.0
-        ymax = self._read_tag_value(text, "ymax") - 1.0
-
+    def _load_xml_bbox(self, xml_path):
+        import xml.etree.ElementTree as ET
+    
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+    
+        bndbox = root.find("object").find("bndbox")
+    
+        xmin = float(bndbox.find("xmin").text)
+        ymin = float(bndbox.find("ymin").text)
+        xmax = float(bndbox.find("xmax").text)
+        ymax = float(bndbox.find("ymax").text)
+    
         return [xmin, ymin, xmax, ymax]
 
     def __getitem__(self, idx):
@@ -138,11 +142,11 @@ class OxfordIIITPetDataset(Dataset):
 
         xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
         if os.path.exists(xml_path):
-            bbox_xyxy = self._load_xml_bbox(xml_path)
+            x1, y1, x2, y2 = self._load_xml_bbox(xml_path)
         else:
-            bbox_xyxy = [0.0, 0.0, image.shape[1]-1, image.shape[0]-1]
-        
-        x1, y1, x2, y2 = bbox_xyxy
+            # fallback (never used normally)
+            h, w = image.shape[:2]
+            x1, y1, x2, y2 = 0, 0, w - 1, h - 1
         
         bbox = torch.tensor([
             (x1 + x2) / 2.0,
