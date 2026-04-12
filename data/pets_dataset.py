@@ -123,8 +123,8 @@ class OxfordIIITPetDataset(Dataset):
         
         # Oxford-IIIT Pet trimaps use:
         # 1 -> pet/foreground, 2 -> background, 3 -> boundary.
-        mask_final[mask == 1] = 1
-        mask_final[mask == 2] = 0
+        mask_final[mask == 1] = 0
+        mask_final[mask == 2] = 1
         mask_final[mask == 3] = 2
         
         mask_final = np.clip(mask_final, 0, 2)
@@ -171,20 +171,23 @@ class OxfordIIITPetDataset(Dataset):
         label = torch.tensor(self.labels[name]).long()
         
         # BBOX
-        ys, xs = np.where(mask > 0)
-
-        if len(xs) == 0 or len(ys) == 0:
-            bbox = torch.tensor([112,112,50,50], dtype=torch.float32)
-        else:
-            x1, x2 = xs.min(), xs.max()
-            y1, y2 = ys.min(), ys.max()
+        x1, y1, x2, y2 = x1_raw, y1_raw, x2_raw, y2_raw
         
-            cx = (x1 + x2) / 2
-            cy = (y1 + y2) / 2
-            w = max(x2 - x1, 1)
-            h = max(y2 - y1, 1)
+        # SCALE to 224 AFTER resize
+        scale_x = 224.0 / image.shape[1]
+        scale_y = 224.0 / image.shape[0]
         
-            bbox = torch.tensor([cx, cy, w, h], dtype=torch.float32)
+        x1 *= scale_x
+        x2 *= scale_x
+        y1 *= scale_y
+        y2 *= scale_y
+        
+        cx = (x1 + x2) / 2.0
+        cy = (y1 + y2) / 2.0
+        w = max(x2 - x1, 1.0)
+        h = max(y2 - y1, 1.0)
+        
+        bbox = torch.tensor([cx, cy, w, h], dtype=torch.float32)
 
         return image, label, bbox, mask
     
