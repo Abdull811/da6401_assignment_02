@@ -61,7 +61,7 @@ class OxfordIIITPetDataset(Dataset):
             A.Normalize(
                 mean=(0.485, 0.456, 0.406),
                 std=(0.229, 0.224, 0.225),
-                max_pixel_value=255.0,
+                max_pixel_value=1.0,
             )
         )
 
@@ -98,20 +98,17 @@ class OxfordIIITPetDataset(Dataset):
         start += len(start_token)
         return float(text[start:end].strip())
 
-    def _load_xml_bbox(self, xml_path):
-        import xml.etree.ElementTree as ET
+        def _load_xml_bbox(self, xml_path: str):
+            with open(xml_path, "r", encoding="utf-8") as f:
+                text = f.read()
     
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
+            xmin = self._read_tag_value(text, "xmin") - 1.0
+            ymin = self._read_tag_value(text, "ymin") - 1.0
+            xmax = self._read_tag_value(text, "xmax") - 1.0
+            ymax = self._read_tag_value(text, "ymax") - 1.0
     
-        bndbox = root.find("object").find("bndbox")
-    
-        xmin = float(bndbox.find("xmin").text)
-        ymin = float(bndbox.find("ymin").text)
-        xmax = float(bndbox.find("xmax").text)
-        ymax = float(bndbox.find("ymax").text)
-    
-        return [xmin, ymin, xmax, ymax]
+            return [xmin, ymin, xmax, ymax]
+            
 
     def __getitem__(self, idx):
         name = self.samples[idx]
@@ -124,8 +121,8 @@ class OxfordIIITPetDataset(Dataset):
         if image.ndim == 3 and image.shape[2] == 4:
             image = image[:, :, :3]
 
-        #if image.max() > 1:
-        #    image = image / 255.0
+        if image.max() > 1:
+            image = image / 255.0
 
         mask = mpimg.imread(mask_path)
 
