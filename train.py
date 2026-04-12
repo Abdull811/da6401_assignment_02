@@ -520,5 +520,5 @@ def run_report_experiments(wandb_mode: str = "online") -> None:
 
 
 if __name__ == "__main__":
-    train(dropout_p=0.2, freeze_mode="full", wandb_mode="online") 
-    #run_report_experiments()
+    #train(dropout_p=0.2, freeze_mode="full", wandb_mode="online") 
+    run_report_experiments()
