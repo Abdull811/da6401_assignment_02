@@ -1,19 +1,18 @@
 """Dataset loader for Oxford-IIIT Pet"""
 
 import os
-
-import albumentations as A
-import matplotlib.image as mpimg
-import numpy as np
 import torch
+import numpy as np
 from torch.utils.data import Dataset
+import matplotlib.image as mpimg
+import albumentations as A
 
 
 class OxfordIIITPetDataset(Dataset):
     """
     Multi-task dataset:
     - classification (breed)
-    - localization (head bbox)
+    - localization (dummy bbox)
     - segmentation (trimap)
     """
 
@@ -23,6 +22,7 @@ class OxfordIIITPetDataset(Dataset):
         self.crop_for_classification = crop_for_classification
         self.crop_margin = crop_margin
 
+        # PATHS
         self.images_dir = os.path.join(root, "images")
         self.masks_dir = os.path.join(root, "annotations", "trimaps")
 
@@ -33,6 +33,7 @@ class OxfordIIITPetDataset(Dataset):
         else:
             raise ValueError("split must be 'train' or 'val'")
 
+        # TRANSFORM
         transforms = [A.Resize(224, 224)]
         if split == "train":
             if crop_for_classification:
@@ -40,6 +41,8 @@ class OxfordIIITPetDataset(Dataset):
                     [
                         A.HorizontalFlip(p=0.5),
                         A.RandomBrightnessContrast(p=0.25),
+                        # A.HorizontalFlip(p=0.5),
+                        # A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
                         A.Affine(
                             translate_percent=(-0.03, 0.03),
                             scale=(0.92, 1.08),
@@ -56,7 +59,6 @@ class OxfordIIITPetDataset(Dataset):
                         A.RandomBrightnessContrast(p=0.3),
                     ]
                 )
-
         transforms.append(
             A.Normalize(
                 mean=(0.485, 0.456, 0.406),
@@ -64,51 +66,25 @@ class OxfordIIITPetDataset(Dataset):
                 max_pixel_value=1.0,
             )
         )
-
-        self.image_transform = A.Compose(transforms)
-        self.task_transform = A.Compose(
-            transforms,
-            bbox_params=A.BboxParams(format="pascal_voc", label_fields=["bbox_labels"]),
-        )
+        self.transform = A.Compose(transforms)
 
         self.samples = []
         self.labels = {}
 
+        # LOAD SPLIT
         with open(self.split_file, "r") as f:
             for line in f:
                 parts = line.strip().split()
+
                 name = parts[0]
-                label = int(parts[1]) - 1
+                label = int(parts[1]) - 1  # 0-based
+
                 self.samples.append(name)
                 self.labels[name] = label
 
+                
     def __len__(self):
         return len(self.samples)
-
-    def _read_tag_value(self, text: str, tag: str) -> float:
-        start_token = f"<{tag}>"
-        end_token = f"</{tag}>"
-
-        start = text.find(start_token)
-        end = text.find(end_token)
-
-        if start == -1 or end == -1:
-            raise ValueError(f"Tag {tag} not found in XML")
-
-        start += len(start_token)
-        return float(text[start:end].strip())
-
-        def _load_xml_bbox(self, xml_path: str):
-            with open(xml_path, "r", encoding="utf-8") as f:
-                text = f.read()
-    
-            xmin = self._read_tag_value(text, "xmin") - 1.0
-            ymin = self._read_tag_value(text, "ymin") - 1.0
-            xmax = self._read_tag_value(text, "xmax") - 1.0
-            ymax = self._read_tag_value(text, "ymax") - 1.0
-    
-            return [xmin, ymin, xmax, ymax]
-            
 
     def __getitem__(self, idx):
         name = self.samples[idx]
@@ -116,97 +92,99 @@ class OxfordIIITPetDataset(Dataset):
         img_path = os.path.join(self.images_dir, name + ".jpg")
         mask_path = os.path.join(self.masks_dir, name + ".png")
 
+        # LOAD IMAGE
         image = mpimg.imread(img_path).astype(np.float32)
 
-        if image.ndim == 3 and image.shape[2] == 4:
+        # Remove alpha channel (RGBA → RGB)
+        if len(image.shape) == 3 and image.shape[2] == 4:
             image = image[:, :, :3]
 
+        # Normalize image to [0,1]
         if image.max() > 1:
             image = image / 255.0
 
+        # LOAD MASK
         mask = mpimg.imread(mask_path)
-
-        if mask.ndim == 3:
-            mask = mask[:, :, 0]
-
-        if mask.max() <= 1.0:
-            mask = np.round(mask * 255).astype(np.uint8)
-        else:
-            mask = np.round(mask).astype(np.uint8)
-
-        # 1=foreground, 2=background, 3=boundary -> 0,1,2
-        mask = np.clip(mask.astype(np.int64) - 1, 0, 2)
-
-        xml_path = os.path.join(self.root, "annotations", "xmls", name + ".xml")
-        if os.path.exists(xml_path):
-            x1, y1, x2, y2 = self._load_xml_bbox(xml_path)
-        else:
-            # fallback (never used normally)
-            h, w = image.shape[:2]
-            x1, y1, x2, y2 = 0, 0, w - 1, h - 1
-        bbox_xyxy = [x1, y1, x2, y2]
         
-        bbox = torch.tensor([
-            (x1 + x2) / 2.0,
-            (y1 + y2) / 2.0,
-            max(x2 - x1, 1.0),
-            max(y2 - y1, 1.0),
-        ], dtype=torch.float32)
+        # Convert to single channel if needed
+        if len(mask.shape) == 3:
+            mask = mask[:, :, 0]
+        
+        # Convert properly to uint8
+        if mask.max() <= 1.0:
+            mask = (mask * 255).astype(np.uint8)
+        else:
+            mask = mask.astype(np.uint8)
+        
+        mask = np.round(mask).astype(np.uint8)
+        
+        # FINAL LABEL MAPPING
+        mask_final = np.zeros_like(mask, dtype=np.int64)
+        
+        # Oxford-IIIT Pet trimaps use:
+        # 1 -> pet/foreground, 2 -> background, 3 -> boundary.
+        mask_final[mask == 1] = 1
+        mask_final[mask == 2] = 0
+        mask_final[mask == 3] = 2
+        
+        mask_final = np.clip(mask_final, 0, 2)
+        
+        mask = mask_final
+
+        ys_raw, xs_raw = np.where(mask > 0)
+        if len(xs_raw) == 0 or len(ys_raw) == 0:
+            x1_raw, y1_raw, x2_raw, y2_raw = 0, 0, image.shape[1] - 1, image.shape[0] - 1
+        else:
+            x1_raw, x2_raw = xs_raw.min(), xs_raw.max()
+            y1_raw, y2_raw = ys_raw.min(), ys_raw.max()
 
         if self.crop_for_classification:
-            x1_box, y1_box, x2_box, y2_box = bbox_xyxy
-
-            box_w = x2_box - x1_box + 1.0
-            box_h = y2_box - y1_box + 1.0
+            box_w = x2_raw - x1_raw + 1
+            box_h = y2_raw - y1_raw + 1
             side = int(max(box_w, box_h) * (1.0 + self.crop_margin))
             side = max(side, 32)
 
-            cx = int((x1_box + x2_box) / 2.0)
-            cy = int((y1_box + y2_box) / 2.0)
+            cx = (x1_raw + x2_raw) // 2
+            cy = (y1_raw + y2_raw) // 2
 
             x1_crop = max(0, cx - side // 2)
             y1_crop = max(0, cy - side // 2)
             x2_crop = min(image.shape[1] - 1, x1_crop + side - 1)
             y2_crop = min(image.shape[0] - 1, y1_crop + side - 1)
 
+            # Re-anchor the square crop when clipped by image borders.
             x1_crop = max(0, x2_crop - side + 1)
             y1_crop = max(0, y2_crop - side + 1)
 
-            image = image[y1_crop:y2_crop + 1, x1_crop:x2_crop + 1]
-            mask = mask[y1_crop:y2_crop + 1, x1_crop:x2_crop + 1]
+            image = image[y1_crop : y2_crop + 1, x1_crop : x2_crop + 1]
+            mask = mask[y1_crop : y2_crop + 1, x1_crop : x2_crop + 1]
 
-            augmented = self.image_transform(image=image, mask=mask)
-            image = torch.tensor(augmented["image"]).permute(2, 0, 1)
-            mask = torch.tensor(augmented["mask"]).long()
-            label = torch.tensor(self.labels[name]).long()
-            bbox = torch.tensor([
-                image.shape[2] / 2,
-                image.shape[1] / 2,
-                image.shape[2] * 0.5,
-                image.shape[1] * 0.5,
-            ], dtype=torch.float32)
-            return image, label, bbox, mask
+        # APPLY TRANSFORM
+        augmented = self.transform(image=image, mask=mask)
+        image = augmented["image"]
+        mask = augmented["mask"]
 
-        augmented = self.task_transform(
-            image=image,
-            mask=mask,
-            bboxes=[bbox_xyxy],
-            bbox_labels=[0],
-        )
+        # TO TENSOR
+        image = torch.tensor(image).permute(2, 0, 1)
+        mask = torch.tensor(mask).long()
 
-        image = torch.tensor(augmented["image"]).permute(2, 0, 1)
-        mask = torch.tensor(augmented["mask"]).long()
         label = torch.tensor(self.labels[name]).long()
+        
+        # BBOX
+        ys, xs = np.where(mask > 0)
 
-        x1, y1, x2, y2 = augmented["bboxes"][0]
-        bbox = torch.tensor(
-            [
-                (x1 + x2) / 2.0,
-                (y1 + y2) / 2.0,
-                max(x2 - x1, 1.0),
-                max(y2 - y1, 1.0),
-            ],
-            dtype=torch.float32,
-        )
+        if len(xs) == 0 or len(ys) == 0:
+            bbox = torch.tensor([112,112,50,50], dtype=torch.float32)
+        else:
+            x1, x2 = xs.min(), xs.max()
+            y1, y2 = ys.min(), ys.max()
+        
+            cx = (x1 + x2) / 2
+            cy = (y1 + y2) / 2
+            w = max(x2 - x1, 1)
+            h = max(y2 - y1, 1)
+        
+            bbox = torch.tensor([cx, cy, w, h], dtype=torch.float32)
 
         return image, label, bbox, mask
+    
