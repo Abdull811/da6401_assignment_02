@@ -275,8 +275,8 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
             {
                 "cls_epoch": epoch,
                 "cls_train_loss": train_loss / max(len(train_loader), 1),
-                "val_cls_loss": val_loss / len(val_loader),
                 "cls_train_acc": train_acc,
+                "val_cls_loss": val_loss / max(len(val_loader), 1),
                 "val_cls_macro_f1": macro_f1,
                 "val_cls_acc": val_acc,
                 "cls_lr": optimizer.param_groups[0]["lr"],
