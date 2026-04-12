@@ -80,14 +80,13 @@ def draw_box(img: np.ndarray, box, color) -> np.ndarray:
 def dice_score(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     pred = torch.argmax(logits, dim=1)
     score = 0.0
-    num_classes = logits.shape[1]
-    for cls in range(num_classes):
+    for cls in range(1, 3):
         pred_c = (pred == cls).float()
         target_c = (target == cls).float()
         inter = (pred_c * target_c).sum()
         union = pred_c.sum() + target_c.sum()
         score += (2 * inter + 1e-6) / (union + 1e-6)
-    return score / num_classes
+    return score / 2.0
 
 
 def dice_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -304,7 +303,7 @@ def train_localizer(
     criterion_reg = nn.SmoothL1Loss(beta=5.0)
     criterion_iou = IoULoss()
     optimizer = optim.Adam(model.parameters(), lr=LOCALIZER_LR, weight_decay=1e-5)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=4, min_lr=1e-6)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
     best_iou = -1.0
 
     for epoch in range(1, LOCALIZER_EPOCHS + 1):
@@ -317,7 +316,7 @@ def train_localizer(
 
             optimizer.zero_grad()
             pred_boxes = model(images)
-            loss = criterion_iou(pred_boxes, boxes) + 0.1 * criterion_reg(pred_boxes, boxes)
+            loss = 0.5 * criterion_reg(pred_boxes, boxes) + criterion_iou(pred_boxes, boxes)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
@@ -391,7 +390,7 @@ def train_segmenter(
 ) -> float:
     model.encoder.load_state_dict(encoder_state, strict=False)
     set_segmentation_freeze_mode(model, freeze_mode)
-    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([1.0, 0.1, 2.0], device=DEVICE))
+    criterion_ce = nn.CrossEntropyLoss(weight=torch.tensor([0.1, 1.0, 2.0], device=DEVICE))
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=SEGMENTER_LR, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
     best_dice = -1.0
@@ -517,9 +516,9 @@ def run_report_experiments(wandb_mode: str = "online") -> None:
         train(dropout_p=dropout_p, freeze_mode="full", wandb_mode=wandb_mode, use_batchnorm=True)
 
     for freeze_mode in ["freeze", "partial", "full"]:
-        train(dropout_p=0.2, freeze_mode="full", wandb_mode="online", use_batchnorm=True)
+        train(dropout_p=0.2, freeze_mode=freeze_mode, wandb_mode=wandb_mode, use_batchnorm=True)
 
 
 if __name__ == "__main__":
-    train(dropout_p=0.5, freeze_mode="full", wandb_mode="online") 
+    train(dropout_p=0.2, freeze_mode="full", wandb_mode="online") 
     #run_report_experiments()
