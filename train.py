@@ -241,6 +241,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
         conv3_hist = None
         val_correct = 0
         val_total = 0
+        val_loss = 0.0 
 
         with torch.no_grad():
             for batch_idx, (images, labels, _, _) in enumerate(val_loader):
