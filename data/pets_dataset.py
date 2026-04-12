@@ -147,6 +147,7 @@ class OxfordIIITPetDataset(Dataset):
             # fallback (never used normally)
             h, w = image.shape[:2]
             x1, y1, x2, y2 = 0, 0, w - 1, h - 1
+        bbox_xyxy = [x1, y1, x2, y2]
         
         bbox = torch.tensor([
             (x1 + x2) / 2.0,
