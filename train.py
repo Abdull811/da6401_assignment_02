@@ -28,7 +28,7 @@ from models.segmentation import VGG11UNet
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
 CLASSIFIER_EPOCHS = 50
-LOCALIZER_EPOCHS = 20
+LOCALIZER_EPOCHS = 40
 SEGMENTER_EPOCHS = 20
 CLASSIFIER_LR = 1e-4
 LOCALIZER_LR = 1e-4
@@ -80,13 +80,14 @@ def draw_box(img: np.ndarray, box, color) -> np.ndarray:
 def dice_score(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     pred = torch.argmax(logits, dim=1)
     score = 0.0
-    for cls in range(1, 3):
+    num_classes = logits.shape[1]
+    for cls in range(num_classes):
         pred_c = (pred == cls).float()
         target_c = (target == cls).float()
         inter = (pred_c * target_c).sum()
         union = pred_c.sum() + target_c.sum()
         score += (2 * inter + 1e-6) / (union + 1e-6)
-    return score / 2.0
+    return score / num_classes
 
 
 def dice_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -303,7 +304,7 @@ def train_localizer(
     criterion_reg = nn.SmoothL1Loss(beta=5.0)
     criterion_iou = IoULoss()
     optimizer = optim.Adam(model.parameters(), lr=LOCALIZER_LR, weight_decay=1e-5)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=2)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=4, min_lr=1e-6)
     best_iou = -1.0
 
     for epoch in range(1, LOCALIZER_EPOCHS + 1):
@@ -316,7 +317,7 @@ def train_localizer(
 
             optimizer.zero_grad()
             pred_boxes = model(images)
-            loss = 0.5 * criterion_reg(pred_boxes, boxes) + criterion_iou(pred_boxes, boxes)
+            loss = criterion_iou(pred_boxes, boxes) + 0.1 * criterion_reg(pred_boxes, boxes)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
