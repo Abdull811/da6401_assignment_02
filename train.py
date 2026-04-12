@@ -320,7 +320,7 @@ def train_localizer(
 
             optimizer.zero_grad()
             pred_boxes = model(images)
-            loss = SmoothL1Loss(pred_boxes, boxes) + 2.0 * IoULoss(pred_boxes, boxes)
+            loss = nn.SmoothL1Loss(pred_boxes, boxes) + 2.0 * IoULoss(pred_boxes, boxes)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
