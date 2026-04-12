@@ -27,9 +27,9 @@ from models.segmentation import VGG11UNet
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 32
-CLASSIFIER_EPOCHS = 5
-LOCALIZER_EPOCHS = 5
-SEGMENTER_EPOCHS = 5
+CLASSIFIER_EPOCHS = 40
+LOCALIZER_EPOCHS = 20
+SEGMENTER_EPOCHS = 20
 CLASSIFIER_LR = 1e-4
 LOCALIZER_LR = 1e-4
 SEGMENTER_LR = 1e-4
@@ -81,7 +81,7 @@ def dice_score(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     pred = torch.argmax(logits, dim=1)
     score = 0.0
     num_classes = logits.shape[1]
-    for cls in range(num_classes):
+    for cls in range(1, 3):
         pred_c = (pred == cls).float()
         target_c = (target == cls).float()
         inter = (pred_c * target_c).sum()
@@ -406,7 +406,7 @@ def train_segmenter(
 
             optimizer.zero_grad()
             logits = model(images)
-            loss = 0.5 * criterion_ce(logits, masks) + 1.5 * dice_loss(logits, masks)
+            loss = criterion_ce(logits, masks) + dice_loss(logits, masks)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
