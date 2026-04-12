@@ -247,6 +247,8 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
                 images = images.to(DEVICE)
                 labels = labels.to(DEVICE)
                 logits = model(images)
+                loss = criterion(logits, labels) 
+                val_loss += loss.item() 
                 pred_labels.append(torch.argmax(logits, dim=1).cpu().numpy())
                 true_labels.append(labels.cpu().numpy())
                 val_correct += (torch.argmax(logits, dim=1) == labels).sum().item()
@@ -272,6 +274,7 @@ def train_classifier(model: VGG11Classifier, train_loader: DataLoader, val_loade
             {
                 "cls_epoch": epoch,
                 "cls_train_loss": train_loss / max(len(train_loader), 1),
+                "val_cls_loss": val_loss / len(val_loader),
                 "cls_train_acc": train_acc,
                 "val_cls_macro_f1": macro_f1,
                 "val_cls_acc": val_acc,
@@ -473,7 +476,7 @@ def train(
     set_seed()
     wandb.init(
         project="da6401_assignment_02",
-        name=f"dropout_{dropout_p}_{freeze_mode}",
+        name=f"dropout_{dropout_p}_{freeze_mode}_bn_{use_batchnorm}",
         config={
             "dropout": dropout_p,
             "freeze_mode": freeze_mode,
@@ -520,5 +523,5 @@ def run_report_experiments(wandb_mode: str = "online") -> None:
 
 
 if __name__ == "__main__":
-    train(dropout_p=0.2, freeze_mode="full", wandb_mode="online") 
-    #run_report_experiments()
+    #train(dropout_p=0.2, freeze_mode="full", wandb_mode="online") 
+    run_report_experiments(wandb_mode="online")
