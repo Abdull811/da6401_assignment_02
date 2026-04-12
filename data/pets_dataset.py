@@ -140,16 +140,16 @@ class OxfordIIITPetDataset(Dataset):
         if os.path.exists(xml_path):
             bbox_xyxy = self._load_xml_bbox(xml_path)
         else:
-            ys_raw, xs_raw = np.where(mask == 0)
-            if len(xs_raw) == 0 or len(ys_raw) == 0:
-                bbox_xyxy = [0.0, 0.0, float(image.shape[1] - 1), float(image.shape[0] - 1)]
-            else:
-                bbox_xyxy = [
-                    float(xs_raw.min()),
-                    float(ys_raw.min()),
-                    float(xs_raw.max()),
-                    float(ys_raw.max()),
-                ]
+            bbox_xyxy = [0.0, 0.0, image.shape[1]-1, image.shape[0]-1]
+        
+        x1, y1, x2, y2 = bbox_xyxy
+        
+        bbox = torch.tensor([
+            (x1 + x2) / 2.0,
+            (y1 + y2) / 2.0,
+            max(x2 - x1, 1.0),
+            max(y2 - y1, 1.0),
+        ], dtype=torch.float32)
 
         if self.crop_for_classification:
             x1_box, y1_box, x2_box, y2_box = bbox_xyxy
